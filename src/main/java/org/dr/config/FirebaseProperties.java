@@ -11,6 +11,7 @@ import lombok.Setter;
 @ConfigurationProperties(prefix = "app.firebase")
 public class FirebaseProperties {
     private String key;
+    private String credentialsJson;
     private String projectId;
     private String storageBucket; // Automatically maps app.firebase.storage-bucket
 }

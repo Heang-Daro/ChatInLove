@@ -19,17 +19,37 @@ public class FirebaseConfig {
     private final ResourceLoader resourceLoader;
 
     @PostConstruct
-    public void init() throws IOException {
-        try (InputStream serviceAccount = resourceLoader.getResource(properties.getKey()).getInputStream()) {
-            
-            FirebaseOptions options = FirebaseOptions.builder()
-                    .setCredentials(GoogleCredentials.fromStream(serviceAccount))
-                    .setStorageBucket(properties.getStorageBucket())
-                    .build();
-
-            if (FirebaseApp.getApps().isEmpty()) {
-                FirebaseApp.initializeApp(options);
+    public void init() {
+        try {
+            InputStream serviceAccount = null;
+            if (properties.getCredentialsJson() != null && !properties.getCredentialsJson().isBlank()) {
+                serviceAccount = new java.io.ByteArrayInputStream(
+                        properties.getCredentialsJson().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            } else if (properties.getKey() != null) {
+                var resource = resourceLoader.getResource(properties.getKey());
+                if (resource.exists()) {
+                    serviceAccount = resource.getInputStream();
+                }
             }
+
+            if (serviceAccount != null) {
+                try (serviceAccount) {
+                    FirebaseOptions options = FirebaseOptions.builder()
+                            .setCredentials(GoogleCredentials.fromStream(serviceAccount))
+                            .setStorageBucket(properties.getStorageBucket())
+                            .build();
+
+                    if (FirebaseApp.getApps().isEmpty()) {
+                        FirebaseApp.initializeApp(options);
+                    }
+                }
+            } else {
+                org.slf4j.LoggerFactory.getLogger(FirebaseConfig.class)
+                        .warn("Firebase credentials not found. Provide APP_FIREBASE_CREDENTIALS_JSON or firebase-service-account.json.");
+            }
+        } catch (Exception e) {
+            org.slf4j.LoggerFactory.getLogger(FirebaseConfig.class)
+                    .error("Failed to initialize Firebase: {}", e.getMessage());
         }
     }
 }

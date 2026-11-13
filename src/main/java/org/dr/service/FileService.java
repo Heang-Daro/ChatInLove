@@ -34,6 +34,18 @@ public class FileService {
 
     private final RestClient restClient = RestClient.create();
 
+    private String getCleanKey() {
+        if (serviceRoleKey == null) return "";
+        String key = serviceRoleKey.trim();
+        if ((key.startsWith("\"") && key.endsWith("\"")) || (key.startsWith("'") && key.endsWith("'"))) {
+            key = key.substring(1, key.length() - 1).trim();
+        }
+        if (key.toLowerCase().startsWith("bearer ")) {
+            key = key.substring(7).trim();
+        }
+        return key;
+    }
+
     public UploadResult upload(MultipartFile file) throws IOException {
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null || originalFilename.isEmpty()) {
@@ -49,16 +61,30 @@ public class FileService {
         String uniqueFileName = UUID.randomUUID().toString() + extension;
         MessageType messageType = determineMessageType(file.getContentType(), originalFilename);
 
+        String cleanKey = getCleanKey();
+        if (cleanKey.isEmpty() || cleanKey.contains("your_supabase_service_role_key_here")) {
+            log.error("CRITICAL: SUPABASE_SERVICE_ROLE_KEY is not properly set in environment variables!");
+            throw new IOException("SUPABASE_SERVICE_ROLE_KEY is missing or invalid.");
+        }
+
+        if (!cleanKey.startsWith("eyJ")) {
+            log.warn("WARNING: SUPABASE_SERVICE_ROLE_KEY does not start with 'eyJ'. Supabase Storage requires a JWT (service_role key)!");
+        }
+
+        String cleanBaseUrl = supabaseUrl != null && supabaseUrl.endsWith("/")
+                ? supabaseUrl.substring(0, supabaseUrl.length() - 1)
+                : supabaseUrl;
+
         // Supabase Storage REST API Endpoint for file upload / upsert
-        String uploadUrl = String.format("%s/storage/v1/object/%s/%s", supabaseUrl, bucketName, uniqueFileName);
+        String uploadUrl = String.format("%s/storage/v1/object/%s/%s", cleanBaseUrl, bucketName, uniqueFileName);
 
         try {
             String contentType = file.getContentType() != null ? file.getContentType() : "application/octet-stream";
 
             ResponseEntity<String> response = restClient.post()
                     .uri(uploadUrl)
-                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + serviceRoleKey)
-                    .header("apikey", serviceRoleKey)
+                    .header(HttpHeaders.AUTHORIZATION, "Bearer " + cleanKey)
+                    .header("apikey", cleanKey)
                     .header("x-upsert", "true") // អនុញ្ញាតឱ្យសរសេរជាន់ ឬបង្កើតថ្មី
                     .contentType(MediaType.parseMediaType(contentType))
                     .body(file.getBytes())

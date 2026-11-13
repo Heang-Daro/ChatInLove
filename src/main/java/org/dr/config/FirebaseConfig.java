@@ -32,10 +32,11 @@ public class FirebaseConfig {
                 }
             }
 
-            if (serviceAccount != null) {
-                try (serviceAccount) {
+            final InputStream finalServiceAccount = serviceAccount;
+            if (finalServiceAccount != null) {
+                try (finalServiceAccount) {
                     FirebaseOptions options = FirebaseOptions.builder()
-                            .setCredentials(GoogleCredentials.fromStream(serviceAccount))
+                            .setCredentials(GoogleCredentials.fromStream(finalServiceAccount))
                             .setStorageBucket(properties.getStorageBucket())
                             .build();
 

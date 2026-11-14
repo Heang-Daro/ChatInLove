@@ -16,10 +16,12 @@ import org.dr.model.User;
 import org.dr.service.AuthenticationService;
 import org.dr.service.DeviceSessionService;
 import org.dr.service.JwtService;
+import org.dr.service.ProfileMediaService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -28,10 +30,10 @@ import java.util.List;
 @CrossOrigin("*")
 @RequiredArgsConstructor
 public class AuthController {
-
     private final AuthenticationService authService;
     private final DeviceSessionService deviceSessionService;
     private final JwtService jwtService;
+    private final ProfileMediaService profileMediaService;
 
     @PostMapping("/register")
     public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
@@ -54,6 +56,20 @@ public class AuthController {
         return ResponseEntity.ok(authService.updateProfile(user.getId(), request));
     }
 
+    /** Upload or replace the authenticated user's optional profile avatar. Multipart field: file. */
+    @PostMapping(value = "/profile/image", consumes = "multipart/form-data")
+    public ResponseEntity<UserResponse> uploadProfileImage(@AuthenticationPrincipal User user,
+            @RequestParam("file") MultipartFile file) {
+        return ResponseEntity.ok(profileMediaService.uploadProfileImage(user.getId(), file));
+    }
+
+    /** Upload or replace the authenticated user's optional profile foreground/banner. Multipart field: file. */
+    @PostMapping(value = "/profile/foreground", consumes = "multipart/form-data")
+    public ResponseEntity<UserResponse> uploadForegroundImage(@AuthenticationPrincipal User user,
+            @RequestParam("file") MultipartFile file) {
+        return ResponseEntity.ok(profileMediaService.uploadForegroundImage(user.getId(), file));
+    }
+
     @PutMapping("/change-password")
     public ResponseEntity<Void> changePassword(@AuthenticationPrincipal User user,
             @Valid @RequestBody ChangePasswordRequest request) {
@@ -64,9 +80,7 @@ public class AuthController {
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@AuthenticationPrincipal User user, HttpServletRequest request) {
         String sessionId = extractSessionId(request);
-        if (sessionId == null) {
-            return ResponseEntity.noContent().build();
-        }
+        if (sessionId == null) return ResponseEntity.noContent().build();
         authService.logout(user.getId(), sessionId);
         return ResponseEntity.noContent().build();
     }
@@ -79,7 +93,7 @@ public class AuthController {
 
     @GetMapping("/principal")
     public ResponseEntity<UserResponse> getPrincipal(@AuthenticationPrincipal User user) {
-        return ResponseEntity.ok(new UserResponse(user.getId(), user.getEmail(), user.getUsername()));
+        return ResponseEntity.ok(toUserResponse(user));
     }
 
     @GetMapping("/devices")
@@ -98,22 +112,21 @@ public class AuthController {
             HttpServletRequest request,
             @RequestBody(required = false) DeviceLocationRequest location) {
         String sessionId = extractSessionId(request);
-        if (sessionId == null) {
-            return ResponseEntity.noContent().build();
-        }
+        if (sessionId == null) return ResponseEntity.noContent().build();
         deviceSessionService.updateLocation(user.getId(), sessionId, location, request);
         return ResponseEntity.noContent().build();
     }
 
+    private UserResponse toUserResponse(User user) {
+        return new UserResponse(user.getId(), user.getEmail(), user.getUsername(),
+                user.getProfileImageUrl(), user.getForegroundImageUrl());
+    }
+
     private String extractSessionId(HttpServletRequest request) {
         String header = request.getHeader("Authorization");
-        if (header == null || !header.startsWith("Bearer ")) {
-            return null;
-        }
+        if (header == null || !header.startsWith("Bearer ")) return null;
         String token = header.substring(7).trim();
-        if (token.isEmpty() || !jwtService.isTokenValid(token)) {
-            return null;
-        }
+        if (token.isEmpty() || !jwtService.isTokenValid(token)) return null;
         try {
             return jwtService.extractSessionId(token);
         } catch (Exception e) {

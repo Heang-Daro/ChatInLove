@@ -27,20 +27,13 @@ public class PublicUserController {
     public ResponseEntity<List<UserResponse>> findUserByUsername(
             @PathVariable(required = false) String username,
             @RequestParam(name = "username", required = false) String usernameQuery) {
-
         String searchTerm = username != null ? username : usernameQuery;
-        if (searchTerm == null || searchTerm.isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
+        if (searchTerm == null || searchTerm.isBlank()) return ResponseEntity.badRequest().build();
 
         List<User> users = repository.findByUsernameContainingIgnoreCase(searchTerm.trim());
-
         return ResponseEntity.ok(users.stream()
-                .map(user -> UserResponse.builder()
-                        .id(user.getId())
-                        .username(user.getUsername())
-                        .email(user.getEmail())
-                        .build())
+                .map(user -> new UserResponse(user.getId(), user.getEmail(), user.getUsername(),
+                        user.getProfileImageUrl(), user.getForegroundImageUrl()))
                 .collect(Collectors.toList()));
     }
 }

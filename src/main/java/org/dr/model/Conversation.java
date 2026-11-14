@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.dr.model.enums.ConversationStatus;
 import org.dr.model.enums.ConversationType;
 
 import java.time.LocalDateTime;
@@ -17,7 +18,6 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class Conversation {
-
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
@@ -27,13 +27,22 @@ public class Conversation {
     private ConversationType type;
 
     @Column(nullable = true)
-    private String name;  // Only for GROUP conversations
+    private String name;
 
     @Column(nullable = true)
-    private String description;  // Only for GROUP conversations
+    private String description;
 
     @Column(nullable = true, unique = true)
-    private String privateKey;  // For PRIVATE: "minUserId_maxUserId"
+    private String privateKey;
+
+    /** User who initiated a private chat request; null for groups/legacy chats. */
+    @Column(nullable = true)
+    private String requesterId;
+
+    /** Nullable so existing rows remain compatible; null is treated as ACCEPTED. */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = true)
+    private ConversationStatus status;
 
     @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
@@ -54,10 +63,9 @@ public class Conversation {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
+        if (type == ConversationType.GROUP && status == null) status = ConversationStatus.ACCEPTED;
     }
 
     @PreUpdate
-    protected void onUpdate() {
-        updatedAt = LocalDateTime.now();
-    }
+    protected void onUpdate() { updatedAt = LocalDateTime.now(); }
 }

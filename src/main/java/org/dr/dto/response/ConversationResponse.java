@@ -1,6 +1,7 @@
 package org.dr.dto.response;
 
 import lombok.Builder;
+import org.dr.model.enums.ConversationStatus;
 import org.dr.model.enums.ConversationType;
 
 import java.time.LocalDateTime;
@@ -15,6 +16,14 @@ public record ConversationResponse(
         LocalDateTime createdAt,
         LocalDateTime lastMessageAt,
         List<ConversationMemberResponse> members,
-        MessageResponse lastMessage
+        MessageResponse lastMessage,
+        ConversationStatus status,
+        String requesterId
 ) {
+    public ConversationResponse(String id, ConversationType type, String name, String description,
+            LocalDateTime createdAt, LocalDateTime lastMessageAt,
+            List<ConversationMemberResponse> members, MessageResponse lastMessage) {
+        this(id, type, name, description, createdAt, lastMessageAt, members, lastMessage,
+                ConversationStatus.ACCEPTED, null);
+    }
 }

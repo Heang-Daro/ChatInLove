@@ -21,13 +21,9 @@ import java.util.List;
 @AllArgsConstructor
 @Builder
 public class User implements UserDetails {
+    private static final long serialVersionUID = 1L;
 
-    /**
-	 * 
-	 */
-	private static final long serialVersionUID = 1L;
-
-	@Id
+    @Id
     @GeneratedValue(strategy = GenerationType.UUID)
     private String id;
 
@@ -39,6 +35,14 @@ public class User implements UserDetails {
 
     @Column(nullable = false)
     private String username;
+
+    /** Optional; users may add a profile image after registering. */
+    @Column(nullable = true, length = 2048)
+    private String profileImageUrl;
+
+    /** Optional profile/banner foreground image; users may add it later. */
+    @Column(nullable = true, length = 2048)
+    private String foregroundImageUrl;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -57,9 +61,7 @@ public class User implements UserDetails {
     protected void onCreate() {
         createdAt = LocalDateTime.now();
         updatedAt = LocalDateTime.now();
-        if (role == null) {
-            role = UserRole.USER;
-        }
+        if (role == null) role = UserRole.USER;
     }
 
     @PreUpdate
@@ -73,32 +75,20 @@ public class User implements UserDetails {
     }
 
     @Override
-    public String getPassword() {
-        return passwordHash;
-    }
+    public String getPassword() { return passwordHash; }
 
     @Override
-    public String getUsername() {
-        return username;
-    }
+    public String getUsername() { return email; }
 
     @Override
-    public boolean isAccountNonExpired() {
-        return true;
-    }
+    public boolean isAccountNonExpired() { return true; }
 
     @Override
-    public boolean isAccountNonLocked() {
-        return true;
-    }
+    public boolean isAccountNonLocked() { return true; }
 
     @Override
-    public boolean isCredentialsNonExpired() {
-        return true;
-    }
+    public boolean isCredentialsNonExpired() { return true; }
 
     @Override
-    public boolean isEnabled() {
-        return true;
-    }
+    public boolean isEnabled() { return true; }
 }

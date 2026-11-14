@@ -2,7 +2,6 @@ package org.dr.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-
 import org.dr.dto.request.CreateGroupConversationRequest;
 import org.dr.dto.request.CreatePrivateConversationRequest;
 import org.dr.dto.response.ConversationMemberResponse;
@@ -14,6 +13,7 @@ import org.dr.model.Conversation;
 import org.dr.model.ConversationMember;
 import org.dr.model.Message;
 import org.dr.model.User;
+import org.dr.model.enums.ConversationStatus;
 import org.dr.model.enums.ConversationMemberRole;
 import org.dr.model.enums.ConversationType;
 import org.dr.repository.ConversationMemberRepository;
@@ -36,62 +36,49 @@ public class ConversationService {
     private final ConversationMemberRepository conversationMemberRepository;
     private final MessageRepository messageRepository;
     private final UserRepository userRepository;
-//    private final MessageRepository messageRepository;
 
-    /**
-     * Get all active conversations for the current user with pagination
-     */
     @Transactional(readOnly = true)
     public Page<ConversationResponse> getUserConversations(String userId, Pageable pageable) {
-        return conversationRepository.findActiveConversationsForUser(userId, pageable)
-                .map(conversation -> {
-                    Message last = messageRepository
-                            .findFirstByConversationIdOrderByCreatedAtDesc(conversation.getId())
-                            .orElse(null);   // chat with no messages yet
-                    return toResponse(conversation);
-                });
+        return conversationRepository.findActiveConversationsForUser(userId, pageable).map(this::toResponse);
     }
-    
 
-    /**
-     * Get a specific conversation by ID with membership validation
-     */
+    @Transactional(readOnly = true)
+    public Page<ConversationResponse> getPendingRequests(String userId, Pageable pageable) {
+        return conversationRepository.findPendingRequestsForRecipient(userId, pageable).map(this::toResponse);
+    }
+
     @Transactional(readOnly = true)
     public ConversationResponse getConversation(String conversationId, String userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation not found"));
-
-        // Check membership
         if (!conversationMemberRepository.existsByConversationIdAndUserIdAndLeftAtIsNull(conversationId, userId)) {
             throw new UnauthorizedException("User is not a member of this conversation");
         }
-
+        if (conversation.getStatus() == ConversationStatus.PENDING
+                && !userId.equals(conversation.getRequesterId())) {
+            throw new UnauthorizedException("Accept the chat request before opening this conversation");
+        }
+        if (conversation.getStatus() == ConversationStatus.REJECTED) {
+            throw new UnauthorizedException("This chat request was rejected");
+        }
         return toResponse(conversation);
     }
-    /**
-     * Create a new group conversation
-     */
+
     @Transactional
     public ConversationResponse createGroupConversation(String userId, CreateGroupConversationRequest request) {
         User creator = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("Creator not found"));
-
-        // ១. បង្កើត Conversation ប្រភេទ GROUP
         Conversation conversation = Conversation.builder()
                 .type(ConversationType.GROUP)
                 .name(request.name())
                 .description(request.description())
+                .status(ConversationStatus.ACCEPTED)
                 .build();
-        
         conversation = conversationRepository.save(conversation);
-
-        // ២. បន្ថែមអ្នកបង្កើតជា ADMIN របស់គ្រុប
         addMember(conversation, creator, ConversationMemberRole.ADMIN);
 
-        // ៣. បន្ថែមសមាជិកอื่นๆ ចូលក្នុងគ្រុប (ជា MEMBER)
         if (request.memberIds() != null) {
             for (String memberId : request.memberIds()) {
-                // កុំឱ្យបន្ថែមអ្នកបង្កើតម្តងទៀតបើមានក្នុងបញ្ជី
                 if (!memberId.equals(userId)) {
                     User memberUser = userRepository.findById(memberId)
                             .orElseThrow(() -> new ResourceNotFoundException("User not found: " + memberId));
@@ -99,52 +86,62 @@ public class ConversationService {
                 }
             }
         }
-
         return toResponse(conversation);
     }
-    
 
-    /**
-     * Create or get a private conversation between two users
-     */
-    
     @Transactional
     public ConversationResponse getOrCreatePrivateConversation(String userId, CreatePrivateConversationRequest request) {
+        if (userId.equals(request.recipientId())) throw new IllegalArgumentException("Cannot message yourself");
         User currentUser = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-
         User recipientUser = userRepository.findById(request.recipientId())
                 .orElseThrow(() -> new ResourceNotFoundException("Recipient not found"));
 
-        // Generate private key (minUserId_maxUserId)
-        String minId = currentUser.getId().compareTo(recipientUser.getId()) < 0 ?
-                currentUser.getId() : recipientUser.getId();
-        String maxId = currentUser.getId().compareTo(recipientUser.getId()) < 0 ?
-                recipientUser.getId() : currentUser.getId();
+        String minId = currentUser.getId().compareTo(recipientUser.getId()) < 0 ? currentUser.getId() : recipientUser.getId();
+        String maxId = currentUser.getId().compareTo(recipientUser.getId()) < 0 ? recipientUser.getId() : currentUser.getId();
         String privateKey = minId + "_" + maxId;
 
-        // Check if conversation already exists
-        return conversationRepository.findByPrivateKey(privateKey)
-                .map(this::toResponse)
-                .orElseGet(() -> {
-                    // Create new private conversation
-                    Conversation conversation = Conversation.builder()
-                            .type(ConversationType.PRIVATE)
-                            .privateKey(privateKey)
-                            .build();
-                    conversation = conversationRepository.save(conversation);
+        var existing = conversationRepository.findByPrivateKey(privateKey);
+        if (existing.isPresent()) {
+            Conversation conversation = existing.get();
+            if (conversation.getStatus() == ConversationStatus.REJECTED) {
+                conversation.setStatus(ConversationStatus.PENDING);
+                conversation.setRequesterId(userId);
+                return toResponse(conversationRepository.save(conversation));
+            }
+            return toResponse(conversation);
+        }
 
-                    // Add both users as members
-                    addMember(conversation, currentUser, ConversationMemberRole.MEMBER);
-                    addMember(conversation, recipientUser, ConversationMemberRole.MEMBER);
-
-                    return toResponse(conversation);
-                });
+        Conversation conversation = Conversation.builder()
+                .type(ConversationType.PRIVATE)
+                .privateKey(privateKey)
+                .requesterId(userId)
+                .status(ConversationStatus.PENDING)
+                .build();
+        conversation = conversationRepository.save(conversation);
+        addMember(conversation, currentUser, ConversationMemberRole.MEMBER);
+        addMember(conversation, recipientUser, ConversationMemberRole.MEMBER);
+        return toResponse(conversation);
     }
 
-    /**
-     * Add a member to a conversation
-     */
+    @Transactional
+    public ConversationResponse respondToRequest(String conversationId, String userId, boolean accept) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new ResourceNotFoundException("Chat request not found"));
+        if (conversation.getType() != ConversationType.PRIVATE
+                || !conversationMemberRepository.existsByConversationIdAndUserIdAndLeftAtIsNull(conversationId, userId)) {
+            throw new UnauthorizedException("You are not the recipient of this chat request");
+        }
+        if (userId.equals(conversation.getRequesterId())) {
+            throw new UnauthorizedException("The sender cannot respond to their own chat request");
+        }
+        if (conversation.getStatus() != ConversationStatus.PENDING) {
+            throw new IllegalArgumentException("This chat request has already been handled");
+        }
+        conversation.setStatus(accept ? ConversationStatus.ACCEPTED : ConversationStatus.REJECTED);
+        return toResponse(conversationRepository.save(conversation));
+    }
+
     @Transactional
     private void addMember(Conversation conversation, User user, ConversationMemberRole role) {
         ConversationMember member = ConversationMember.builder()
@@ -156,17 +153,16 @@ public class ConversationService {
         conversationMemberRepository.save(member);
     }
 
-    /**
-     * Mark a message as read by the current user
-     */
     @Transactional
     public void markMessageAsRead(String conversationId, String messageId, String userId) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation not found"));
-
+        if (conversation.getStatus() != ConversationStatus.ACCEPTED
+                && conversation.getStatus() != null) {
+            throw new UnauthorizedException("Accept the chat request before reading messages");
+        }
         ConversationMember member = conversationMemberRepository.findByConversationIdAndUserId(conversationId, userId)
                 .orElseThrow(() -> new UnauthorizedException("User is not a member of this conversation"));
-
         member.setLastReadMessageId(messageId);
         conversationMemberRepository.save(member);
     }
@@ -180,13 +176,14 @@ public class ConversationService {
                         .role(m.getRole())
                         .joinedAt(m.getJoinedAt())
                         .leftAt(m.getLeftAt())
+                        .profileImageUrl(m.getUser().getProfileImageUrl())
                         .build())
                 .collect(Collectors.toList());
 
         MessageResponse lastMessage = messageRepository
                 .findFirstByConversationIdOrderByCreatedAtDesc(conversation.getId())
                 .map(this::toMessageResponse)
-                .orElse(null);   // chat with no messages yet
+                .orElse(null);
 
         return ConversationResponse.builder()
                 .id(conversation.getId())
@@ -196,16 +193,22 @@ public class ConversationService {
                 .createdAt(conversation.getCreatedAt())
                 .lastMessageAt(conversation.getLastMessageAt())
                 .members(members)
-                .lastMessage(lastMessage)   // NEW
+                .lastMessage(lastMessage)
+                .status(conversation.getStatus() == null ? ConversationStatus.ACCEPTED : conversation.getStatus())
+                .requesterId(conversation.getRequesterId())
                 .build();
     }
 
-    private MessageResponse toMessageResponse(Message m) {
+    private MessageResponse toMessageResponse(Message message) {
         return MessageResponse.builder()
-                .id(m.getId())
-                .content(m.getContent())
-                .senderId(m.getSender().getId())
-                .createdAt(m.getCreatedAt())
+                .id(message.getId())
+                .content(message.getContent())
+                .senderId(message.getSender().getId())
+                .senderUsername(message.getSender().getUsername())
+                .conversationId(message.getConversation().getId())
+                .type(message.getType())
+                .isRead(message.isRead())
+                .createdAt(message.getCreatedAt())
                 .build();
     }
 }

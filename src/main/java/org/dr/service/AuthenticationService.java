@@ -6,7 +6,9 @@ import org.dr.dto.request.DeviceLocationRequest;
 import org.dr.dto.request.LoginRequest;
 import org.dr.dto.request.RefreshTokenRequest;
 import org.dr.dto.request.RegisterRequest;
+import org.dr.dto.request.UpdateProfileRequest;
 import org.dr.dto.response.AuthResponse;
+import org.dr.dto.response.UserResponse;
 import org.dr.exception.DuplicateResourceException;
 import org.dr.exception.InvalidCredentialsException;
 import org.dr.exception.ResourceNotFoundException;
@@ -104,6 +106,23 @@ public class AuthenticationService {
                 .tokenType("Bearer")
                 .expiresIn((long) jwtService.getExpirationTimeInSeconds(accessToken))
                 .build();
+    }
+
+    @Transactional
+    public UserResponse updateProfile(String userId, UpdateProfileRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        String normalizedEmail = request.email().trim().toLowerCase();
+        String username = request.username().trim();
+
+        if (userRepository.existsByEmailAndIdNot(normalizedEmail, userId)) {
+            throw new DuplicateResourceException("Email already registered: " + normalizedEmail);
+        }
+
+        user.setEmail(normalizedEmail);
+        user.setUsername(username);
+        User saved = userRepository.save(user);
+        return new UserResponse(saved.getId(), saved.getEmail(), saved.getUsername());
     }
 
     @Transactional

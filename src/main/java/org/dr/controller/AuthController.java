@@ -8,6 +8,7 @@ import org.dr.dto.request.DeviceLocationRequest;
 import org.dr.dto.request.LoginRequest;
 import org.dr.dto.request.RefreshTokenRequest;
 import org.dr.dto.request.RegisterRequest;
+import org.dr.dto.request.UpdateProfileRequest;
 import org.dr.dto.response.AuthResponse;
 import org.dr.dto.response.DeviceSessionResponse;
 import org.dr.dto.response.UserResponse;
@@ -47,9 +48,15 @@ public class AuthController {
         return ResponseEntity.ok(authService.refreshToken(request));
     }
 
+    @PutMapping("/profile")
+    public ResponseEntity<UserResponse> updateProfile(@AuthenticationPrincipal User user,
+            @Valid @RequestBody UpdateProfileRequest request) {
+        return ResponseEntity.ok(authService.updateProfile(user.getId(), request));
+    }
+
     @PutMapping("/change-password")
     public ResponseEntity<Void> changePassword(@AuthenticationPrincipal User user,
-                                              @Valid @RequestBody ChangePasswordRequest request) {
+            @Valid @RequestBody ChangePasswordRequest request) {
         authService.changePassword(user.getId(), request.currentPassword(), request.newPassword());
         return ResponseEntity.noContent().build();
     }
@@ -86,9 +93,6 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    /**
-     * Update the location of the device session the current access token belongs to.
-     */
     @PutMapping("/devices/location")
     public ResponseEntity<Void> updateDeviceLocation(@AuthenticationPrincipal User user,
             HttpServletRequest request,

@@ -3,6 +3,7 @@ package org.dr.controller;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.dr.dto.request.ChangePasswordRequest;
 import org.dr.dto.request.DeviceLocationRequest;
 import org.dr.dto.request.LoginRequest;
 import org.dr.dto.request.RefreshTokenRequest;
@@ -46,13 +47,17 @@ public class AuthController {
         return ResponseEntity.ok(authService.refreshToken(request));
     }
 
+    @PutMapping("/change-password")
+    public ResponseEntity<Void> changePassword(@AuthenticationPrincipal User user,
+                                              @Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(user.getId(), request.currentPassword(), request.newPassword());
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/logout")
     public ResponseEntity<Void> logout(@AuthenticationPrincipal User user, HttpServletRequest request) {
-        // The device session id lives in the "sid" claim of the access token,
-        // so we can revoke exactly the session this request came from.
         String sessionId = extractSessionId(request);
         if (sessionId == null) {
-            // No usable token: nothing to revoke server side.
             return ResponseEntity.noContent().build();
         }
         authService.logout(user.getId(), sessionId);
@@ -67,7 +72,7 @@ public class AuthController {
 
     @GetMapping("/principal")
     public ResponseEntity<UserResponse> getPrincipal(@AuthenticationPrincipal User user) {
-        return ResponseEntity.ok(new UserResponse(user.getId(),user.getEmail(),user.getUsername()));
+        return ResponseEntity.ok(new UserResponse(user.getId(), user.getEmail(), user.getUsername()));
     }
 
     @GetMapping("/devices")
@@ -83,9 +88,6 @@ public class AuthController {
 
     /**
      * Update the location of the device session the current access token belongs to.
-     *
-     * <p>The location may be sent in the JSON body, in the HTTP headers, or
-     * split across both. The body wins for any field it supplies.
      */
     @PutMapping("/devices/location")
     public ResponseEntity<Void> updateDeviceLocation(@AuthenticationPrincipal User user,
@@ -99,7 +101,6 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
-    /** Reads the "sid" (device session) claim from the Bearer access token. */
     private String extractSessionId(HttpServletRequest request) {
         String header = request.getHeader("Authorization");
         if (header == null || !header.startsWith("Bearer ")) {

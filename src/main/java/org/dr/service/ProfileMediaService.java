@@ -17,7 +17,6 @@ import java.util.Locale;
 @Service
 @RequiredArgsConstructor
 public class ProfileMediaService {
-    private static final long MAX_IMAGE_SIZE_BYTES = 5L * 1024 * 1024;
 
     private final UserRepository userRepository;
     private final FileService fileService;
@@ -54,9 +53,6 @@ public class ProfileMediaService {
     private void validateImage(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Choose an image to upload");
-        }
-        if (file.getSize() > MAX_IMAGE_SIZE_BYTES) {
-            throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE, "Image must be 5 MB or smaller");
         }
         String contentType = file.getContentType();
         if (contentType == null || !contentType.toLowerCase(Locale.ROOT).startsWith("image/")) {

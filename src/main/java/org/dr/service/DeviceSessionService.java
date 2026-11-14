@@ -25,6 +25,20 @@ public class DeviceSessionService {
     private final DeviceLocationResolver locationResolver;
 
     /**
+     * Get the caller's current device session by session ID extracted from their JWT.
+     */
+    @Transactional(readOnly = true)
+    public DeviceSessionResponse getCurrentDevice(String userId, String sessionId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        DeviceSession session = deviceSessionRepository.findByUserAndIdAndRevokedFalse(user, sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Current device session not found"));
+
+        return toResponse(session);
+    }
+
+    /**
      * Get all active device sessions for a user
      */
     @Transactional(readOnly = true)

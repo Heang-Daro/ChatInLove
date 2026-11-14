@@ -102,6 +102,14 @@ public class AuthController {
         return ResponseEntity.ok(deviceSessionService.getUserDevices(user.getId()));
     }
 
+    @GetMapping("/devices/current")
+    public ResponseEntity<DeviceSessionResponse> getCurrentDevice(@AuthenticationPrincipal User user,
+            HttpServletRequest request) {
+        String sessionId = extractSessionId(request);
+        if (sessionId == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        return ResponseEntity.ok(deviceSessionService.getCurrentDevice(user.getId(), sessionId));
+    }
+
     @DeleteMapping("/devices/{id}")
     public ResponseEntity<Void> revokeDevice(@AuthenticationPrincipal User user, @PathVariable String id) {
         deviceSessionService.revokeDeviceSession(user.getId(), id);

@@ -23,10 +23,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
-import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -36,19 +34,28 @@ import java.time.LocalDateTime;
 @RequiredArgsConstructor
 @Slf4j
 public class AuthenticationService {
+
     private final UserRepository userRepository;
     private final DeviceSessionRepository deviceSessionRepository;
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
     private final DeviceLocationResolver locationResolver;
-    private final FileService fileService;
+
+    // -------------------------------------------------------------------------
+    // Auth
+    // -------------------------------------------------------------------------
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
         String normalizedEmail = request.email().trim().toLowerCase();
-        if (userRepository.existsByEmail(normalizedEmail)) throw new DuplicateResourceException("Email already registered: " + normalizedEmail);
-        User user = User.builder().email(normalizedEmail).username(request.username())
-                .passwordHash(passwordEncoder.encode(request.password())).build();
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw new DuplicateResourceException("Email already registered: " + normalizedEmail);
+        }
+        User user = User.builder()
+                .email(normalizedEmail)
+                .username(request.username())
+                .passwordHash(passwordEncoder.encode(request.password()))
+                .build();
         user = userRepository.save(user);
         log.info("User registered: {}", user.getEmail());
         return createDeviceSessionAndReturnAuth(user, request.location());
@@ -59,31 +66,50 @@ public class AuthenticationService {
         String normalizedEmail = request.email().trim().toLowerCase();
         User user = userRepository.findByEmail(normalizedEmail)
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) throw new InvalidCredentialsException("Invalid email or password");
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
+            throw new InvalidCredentialsException("Invalid email or password");
+        }
         log.info("User logged in: {}", user.getEmail());
         return createDeviceSessionAndReturnAuth(user, request.location());
     }
 
     @Transactional
     public AuthResponse refreshToken(RefreshTokenRequest request) {
-        if (!jwtService.isTokenValid(request.refreshToken())) throw new InvalidCredentialsException("Invalid or expired refresh token");
+        if (!jwtService.isTokenValid(request.refreshToken())) {
+            throw new InvalidCredentialsException("Invalid or expired refresh token");
+        }
         String userId = jwtService.extractUserId(request.refreshToken());
         String sessionId = jwtService.extractSessionId(request.refreshToken());
-        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        DeviceSession session = deviceSessionRepository.findById(sessionId).orElseThrow(() -> new ResourceNotFoundException("Session not found"));
-        if (session.isRevoked() || session.getExpiresAt().isBefore(LocalDateTime.now())) throw new InvalidCredentialsException("Session expired or revoked");
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        DeviceSession session = deviceSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Session not found"));
+        if (session.isRevoked() || session.getExpiresAt().isBefore(LocalDateTime.now())) {
+            throw new InvalidCredentialsException("Session expired or revoked");
+        }
         session.setLastActiveAt(LocalDateTime.now());
         deviceSessionRepository.save(session);
         String accessToken = jwtService.generateAccessToken(user.getId(), sessionId);
-        return AuthResponse.builder().userId(user.getId()).accessToken(accessToken).tokenType("Bearer")
-                .expiresIn((long) jwtService.getExpirationTimeInSeconds(accessToken)).build();
+        return AuthResponse.builder()
+                .userId(user.getId())
+                .accessToken(accessToken)
+                .tokenType("Bearer")
+                .expiresIn((long) jwtService.getExpirationTimeInSeconds(accessToken))
+                .build();
     }
+
+    // -------------------------------------------------------------------------
+    // Profile
+    // -------------------------------------------------------------------------
 
     @Transactional
     public UserResponse updateProfile(String userId, UpdateProfileRequest request) {
-        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         String normalizedEmail = request.email().trim().toLowerCase();
-        if (userRepository.existsByEmailAndIdNot(normalizedEmail, userId)) throw new DuplicateResourceException("Email already registered: " + normalizedEmail);
+        if (userRepository.existsByEmailAndIdNot(normalizedEmail, userId)) {
+            throw new DuplicateResourceException("Email already registered: " + normalizedEmail);
+        }
         user.setEmail(normalizedEmail);
         user.setUsername(request.username().trim());
         return toUserResponse(userRepository.save(user));
@@ -91,51 +117,42 @@ public class AuthenticationService {
 
     @Transactional(readOnly = true)
     public UserResponse getUserResponse(String userId) {
-        return toUserResponse(userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found")));
+        return toUserResponse(userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found")));
     }
 
     private UserResponse toUserResponse(User user) {
-        return new UserResponse(user.getId(), user.getEmail(), user.getUsername(), user.getProfileImageUrl(), user.getForegroundImageUrl());
+        return new UserResponse(user.getId(), user.getEmail(), user.getUsername(),
+                user.getProfileImageUrl(), user.getForegroundImageUrl());
     }
 
-    @Transactional
-    public UserResponse uploadProfileImage(String userId, MultipartFile file) throws IOException {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        FileService.UploadResult result = fileService.upload(file);
-        user.setProfileImageUrl(result.url());
-        User saved = userRepository.save(user);
-        log.info("Profile image updated for user {}", userId);
-        return new UserResponse(saved.getId(), saved.getEmail(), saved.getUsername(),
-                saved.getProfileImageUrl(), saved.getForegroundImageUrl());
-    }
-
-    @Transactional
-    public UserResponse uploadForegroundImage(String userId, MultipartFile file) throws IOException {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        FileService.UploadResult result = fileService.upload(file);
-        user.setForegroundImageUrl(result.url());
-        User saved = userRepository.save(user);
-        log.info("Foreground image updated for user {}", userId);
-        return new UserResponse(saved.getId(), saved.getEmail(), saved.getUsername(),
-                saved.getProfileImageUrl(), saved.getForegroundImageUrl());
-    }
+    // -------------------------------------------------------------------------
+    // Password
+    // -------------------------------------------------------------------------
 
     @Transactional
     public void changePassword(String userId, String currentPassword, String newPassword) {
-        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found"));
-        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) throw new InvalidCredentialsException("Current password is incorrect");
-        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) throw new InvalidCredentialsException("New password must be different from the current password");
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        if (!passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new InvalidCredentialsException("Current password is incorrect");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+            throw new InvalidCredentialsException("New password must be different from the current password");
+        }
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         userRepository.save(user);
-        log.info("Password changed for user {}", user.getEmail());
+        log.info("Password changed for user {}", userId);
     }
+
+    // -------------------------------------------------------------------------
+    // Sessions
+    // -------------------------------------------------------------------------
 
     @Transactional
     public void logout(String userId, String sessionId) {
-        DeviceSession session = deviceSessionRepository.findById(sessionId).orElseThrow(() -> new ResourceNotFoundException("Session not found"));
-        if (!session.getUser().getId().equals(userId)) throw new InvalidCredentialsException("Invalid session");
+        DeviceSession session = deviceSessionRepository.findById(sessionId)
+                .orElseThrow(() -> new ResourceNotFoundException("Session not found"));
         session.setRevoked(true);
         deviceSessionRepository.save(session);
         log.info("User {} logged out from session {}", userId, sessionId);
@@ -143,34 +160,56 @@ public class AuthenticationService {
 
     @Transactional
     public void logoutAll(String userId) {
-        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         var sessions = deviceSessionRepository.findByUserAndRevokedFalse(user);
-        sessions.forEach(session -> session.setRevoked(true));
+        sessions.forEach(s -> s.setRevoked(true));
         deviceSessionRepository.saveAll(sessions);
         log.info("User {} logged out from all devices", userId);
     }
+
+    // -------------------------------------------------------------------------
+    // Internal helpers
+    // -------------------------------------------------------------------------
 
     @Transactional
     private AuthResponse createDeviceSessionAndReturnAuth(User user, DeviceLocationRequest bodyLocation) {
         ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
         HttpServletRequest request = attributes == null ? null : attributes.getRequest();
+
         String ipAddress = request != null ? getClientIpAddress(request) : "0.0.0.0";
-        String userAgent = request != null && request.getHeader("User-Agent") != null ? request.getHeader("User-Agent") : "Unknown";
+        String userAgent = (request != null && request.getHeader("User-Agent") != null)
+                ? request.getHeader("User-Agent") : "Unknown";
+
         DeviceLocationRequest location = locationResolver.resolve(bodyLocation, request);
-        DeviceSession session = DeviceSession.builder().user(user)
+
+        DeviceSession session = DeviceSession.builder()
+                .user(user)
                 .deviceName(locationResolver.resolveDeviceName(request, getDeviceName(userAgent)))
-                .deviceType(resolveDeviceType(request, userAgent)).ipAddress(ipAddress).userAgent(userAgent)
-                .lastActiveAt(LocalDateTime.now()).expiresAt(LocalDateTime.now().plusDays(7))
-                .refreshTokenHash(hashToken(TokenGenerator.generateSecureToken())).build();
+                .deviceType(resolveDeviceType(request, userAgent))
+                .ipAddress(ipAddress)
+                .userAgent(userAgent)
+                .lastActiveAt(LocalDateTime.now())
+                .expiresAt(LocalDateTime.now().plusDays(7))
+                .refreshTokenHash(hashToken(TokenGenerator.generateSecureToken()))
+                .build();
         session = deviceSessionRepository.save(session);
+
         if (location != null) {
             applyLocation(session, location);
             session = deviceSessionRepository.save(session);
         }
+
         String accessToken = jwtService.generateAccessToken(user.getId(), session.getId());
         String refreshToken = jwtService.generateRefreshToken(user.getId(), session.getId());
-        return AuthResponse.builder().userId(user.getId()).accessToken(accessToken).refreshToken(refreshToken)
-                .tokenType("Bearer").expiresIn((long) jwtService.getExpirationTimeInSeconds(accessToken)).build();
+
+        return AuthResponse.builder()
+                .userId(user.getId())
+                .accessToken(accessToken)
+                .refreshToken(refreshToken)
+                .tokenType("Bearer")
+                .expiresIn((long) jwtService.getExpirationTimeInSeconds(accessToken))
+                .build();
     }
 
     private DeviceType resolveDeviceType(HttpServletRequest request, String userAgent) {
@@ -194,8 +233,7 @@ public class AuthenticationService {
     }
 
     private String getClientIpAddress(HttpServletRequest request) {
-        String[] headers = {"X-Forwarded-For", "CF-Connecting-IP", "X-Forwarded-Host", "X-Real-IP"};
-        for (String header : headers) {
+        for (String header : new String[]{"X-Forwarded-For", "CF-Connecting-IP", "X-Forwarded-Host", "X-Real-IP"}) {
             String ip = request.getHeader(header);
             if (ip != null && !ip.isEmpty() && !"unknown".equalsIgnoreCase(ip)) return ip.split(",")[0];
         }
@@ -217,9 +255,9 @@ public class AuthenticationService {
             byte[] hash = MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
             StringBuilder hex = new StringBuilder();
             for (byte b : hash) {
-                String value = Integer.toHexString(0xff & b);
-                if (value.length() == 1) hex.append('0');
-                hex.append(value);
+                String v = Integer.toHexString(0xff & b);
+                if (v.length() == 1) hex.append('0');
+                hex.append(v);
             }
             return hex.toString();
         } catch (NoSuchAlgorithmException e) {

@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "invite_links", uniqueConstraints = {
@@ -52,12 +53,12 @@ public class InviteLink {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 
     public boolean isExpired() {
         if (expiresAt == null) return false;
-        return LocalDateTime.now().isAfter(expiresAt);
+        return LocalDateTime.now(ZoneOffset.UTC).isAfter(expiresAt);
     }
 
     public boolean isFull() {

@@ -29,6 +29,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Service
 @RequiredArgsConstructor
@@ -84,10 +85,10 @@ public class AuthenticationService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         DeviceSession session = deviceSessionRepository.findById(sessionId)
                 .orElseThrow(() -> new ResourceNotFoundException("Session not found"));
-        if (session.isRevoked() || session.getExpiresAt().isBefore(LocalDateTime.now())) {
+        if (session.isRevoked() || session.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC))) {
             throw new InvalidCredentialsException("Session expired or revoked");
         }
-        session.setLastActiveAt(LocalDateTime.now());
+        session.setLastActiveAt(LocalDateTime.now(ZoneOffset.UTC));
         deviceSessionRepository.save(session);
         String accessToken = jwtService.generateAccessToken(user.getId(), sessionId);
         return AuthResponse.builder()
@@ -189,8 +190,8 @@ public class AuthenticationService {
                 .deviceType(resolveDeviceType(request, userAgent))
                 .ipAddress(ipAddress)
                 .userAgent(userAgent)
-                .lastActiveAt(LocalDateTime.now())
-                .expiresAt(LocalDateTime.now().plusDays(7))
+                .lastActiveAt(LocalDateTime.now(ZoneOffset.UTC))
+                .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusDays(7))
                 .refreshTokenHash(hashToken(TokenGenerator.generateSecureToken()))
                 .build();
         session = deviceSessionRepository.save(session);
@@ -229,7 +230,7 @@ public class AuthenticationService {
         if (location.mapY() != null) session.setMapY(location.mapY());
         if (location.city() != null && !location.city().isBlank()) session.setCity(location.city());
         if (location.country() != null && !location.country().isBlank()) session.setCountry(location.country());
-        session.setLocationUpdatedAt(LocalDateTime.now());
+        session.setLocationUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     private String getClientIpAddress(HttpServletRequest request) {

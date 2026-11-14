@@ -1,6 +1,7 @@
 package org.dr.model;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
@@ -29,5 +30,5 @@ public class Room {
     private String roomImages; // Display image of the room
    
     @Builder.Default
-    private LocalDateTime createdAt = LocalDateTime.now();
+    private LocalDateTime createdAt = LocalDateTime.now(ZoneOffset.UTC);
 }

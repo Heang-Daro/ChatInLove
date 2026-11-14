@@ -9,6 +9,7 @@ import org.dr.model.enums.ConversationStatus;
 import org.dr.model.enums.ConversationType;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Entity
@@ -61,11 +62,11 @@ public class Conversation {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        updatedAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        updatedAt = LocalDateTime.now(ZoneOffset.UTC);
         if (type == ConversationType.GROUP && status == null) status = ConversationStatus.ACCEPTED;
     }
 
     @PreUpdate
-    protected void onUpdate() { updatedAt = LocalDateTime.now(); }
+    protected void onUpdate() { updatedAt = LocalDateTime.now(ZoneOffset.UTC); }
 }

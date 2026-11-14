@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import org.dr.model.enums.DeviceType;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "device_sessions")
@@ -74,7 +75,7 @@ public class DeviceSession {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        lastActiveAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        lastActiveAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 }

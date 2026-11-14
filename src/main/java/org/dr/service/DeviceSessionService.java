@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Service
@@ -46,7 +47,7 @@ public class DeviceSessionService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        return deviceSessionRepository.findByUserAndRevokedFalseAndExpiresAtAfter(user, LocalDateTime.now())
+        return deviceSessionRepository.findByUserAndRevokedFalseAndExpiresAtAfter(user, LocalDateTime.now(ZoneOffset.UTC))
                 .stream()
                 .map(this::toResponse)
                 .toList();
@@ -115,7 +116,7 @@ public class DeviceSessionService {
             session.setIpAddress(DeviceLocationResolver.extractClientIp(request));
         }
 
-        session.setLocationUpdatedAt(LocalDateTime.now());
+        session.setLocationUpdatedAt(LocalDateTime.now(ZoneOffset.UTC));
         deviceSessionRepository.save(session);
 
         log.info("User {} updated location for session {}", userId, sessionId);
@@ -126,7 +127,7 @@ public class DeviceSessionService {
      */
     @Transactional
     public void cleanupExpiredSessions() {
-        deviceSessionRepository.deleteByExpiresAtBefore(LocalDateTime.now());
+        deviceSessionRepository.deleteByExpiresAtBefore(LocalDateTime.now(ZoneOffset.UTC));
         log.debug("Cleaned up expired device sessions");
     }
 

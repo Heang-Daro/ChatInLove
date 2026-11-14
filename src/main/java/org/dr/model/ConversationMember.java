@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import org.dr.model.enums.ConversationMemberRole;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "conversation_members", uniqueConstraints = {
@@ -49,7 +50,7 @@ public class ConversationMember {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
-        joinedAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
+        joinedAt = LocalDateTime.now(ZoneOffset.UTC);
     }
 }

@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.stream.Collectors;
 
 @Service
@@ -148,7 +149,7 @@ public class ConversationService {
                 .conversation(conversation)
                 .user(user)
                 .role(role)
-                .joinedAt(LocalDateTime.now())
+                .joinedAt(LocalDateTime.now(ZoneOffset.UTC))
                 .build();
         conversationMemberRepository.save(member);
     }

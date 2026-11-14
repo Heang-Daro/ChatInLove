@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 import org.dr.model.enums.InviteStatus;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Entity
 @Table(name = "group_invites", uniqueConstraints = {
@@ -47,7 +48,7 @@ public class GroupInvite {
 
     @PrePersist
     protected void onCreate() {
-        createdAt = LocalDateTime.now();
+        createdAt = LocalDateTime.now(ZoneOffset.UTC);
         if (status == null) {
             status = InviteStatus.PENDING;
         }

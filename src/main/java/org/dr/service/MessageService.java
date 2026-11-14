@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Service
 @RequiredArgsConstructor
@@ -70,7 +71,7 @@ public class MessageService {
                 .content(storageUrlService.toAbsoluteUrl(request.content()))
                 .build();
         message = messageRepository.save(message);
-        conversation.setLastMessageAt(LocalDateTime.now());
+        conversation.setLastMessageAt(LocalDateTime.now(ZoneOffset.UTC));
         conversationRepository.save(conversation);
         MessageResponse response = toResponse(message);
 
@@ -139,7 +140,7 @@ public class MessageService {
         if (!message.getSender().getId().equals(userId)) throw new UnauthorizedException("Only the sender can edit this message");
         if (message.getDeletedAt() != null) throw new ResourceNotFoundException("Message has been deleted");
         message.setContent(request.content());
-        message.setEditedAt(LocalDateTime.now());
+        message.setEditedAt(LocalDateTime.now(ZoneOffset.UTC));
         return toResponse(messageRepository.save(message));
     }
 
@@ -148,7 +149,7 @@ public class MessageService {
         Message message = messageRepository.findById(messageId)
                 .orElseThrow(() -> new ResourceNotFoundException("Message not found"));
         if (!message.getSender().getId().equals(userId)) throw new UnauthorizedException("Only the sender can delete this message");
-        message.setDeletedAt(LocalDateTime.now());
+        message.setDeletedAt(LocalDateTime.now(ZoneOffset.UTC));
         messageRepository.save(message);
     }
 

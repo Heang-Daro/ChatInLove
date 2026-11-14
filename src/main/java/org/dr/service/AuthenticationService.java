@@ -23,8 +23,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
+import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -39,6 +41,7 @@ public class AuthenticationService {
     private final JwtService jwtService;
     private final PasswordEncoder passwordEncoder;
     private final DeviceLocationResolver locationResolver;
+    private final FileService fileService;
 
     @Transactional
     public AuthResponse register(RegisterRequest request) {
@@ -93,6 +96,30 @@ public class AuthenticationService {
 
     private UserResponse toUserResponse(User user) {
         return new UserResponse(user.getId(), user.getEmail(), user.getUsername(), user.getProfileImageUrl(), user.getForegroundImageUrl());
+    }
+
+    @Transactional
+    public UserResponse uploadProfileImage(String userId, MultipartFile file) throws IOException {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        FileService.UploadResult result = fileService.upload(file);
+        user.setProfileImageUrl(result.url());
+        User saved = userRepository.save(user);
+        log.info("Profile image updated for user {}", userId);
+        return new UserResponse(saved.getId(), saved.getEmail(), saved.getUsername(),
+                saved.getProfileImageUrl(), saved.getForegroundImageUrl());
+    }
+
+    @Transactional
+    public UserResponse uploadForegroundImage(String userId, MultipartFile file) throws IOException {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        FileService.UploadResult result = fileService.upload(file);
+        user.setForegroundImageUrl(result.url());
+        User saved = userRepository.save(user);
+        log.info("Foreground image updated for user {}", userId);
+        return new UserResponse(saved.getId(), saved.getEmail(), saved.getUsername(),
+                saved.getProfileImageUrl(), saved.getForegroundImageUrl());
     }
 
     @Transactional

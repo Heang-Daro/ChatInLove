@@ -33,16 +33,20 @@ public class ProfileMediaService {
 
     private UserResponse upload(String userId, MultipartFile file, boolean profileImage) {
         validateImage(file);
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        // Verify user exists before uploading
+        if (!userRepository.existsById(userId)) {
+            throw new ResourceNotFoundException("User not found");
+        }
         try {
             String publicUrl = fileService.uploadImage(file).url();
             if (profileImage) {
-                user.setProfileImageUrl(publicUrl);
+                userRepository.updateProfileImageUrl(userId, publicUrl);
             } else {
-                user.setForegroundImageUrl(publicUrl);
+                userRepository.updateForegroundImageUrl(userId, publicUrl);
             }
-            User saved = userRepository.save(user);
+            // Re-fetch to return the updated state without touching the full entity graph
+            User saved = userRepository.findById(userId)
+                    .orElseThrow(() -> new ResourceNotFoundException("User not found"));
             return new UserResponse(saved.getId(), saved.getEmail(), saved.getUsername(),
                     saved.getProfileImageUrl(), saved.getForegroundImageUrl());
         } catch (IOException e) {

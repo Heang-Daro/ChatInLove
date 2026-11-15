@@ -109,9 +109,17 @@ public class CallSessionService {
     public Optional<GroupCallSession> participantLeft(String sessionId, String userId) {
         return groupCallSessionRepo.findById(sessionId).map(s -> {
             s.getActiveParticipantIds().remove(userId);
+            // Only end the session when ALL participants have left.
+            // Require the session to be at least 30 s old so that the caller
+            // leaving before anyone joins does not instantly close the call.
             if (s.getActiveParticipantIds().isEmpty()) {
-                s.setStatus(CallSessionStatus.ENDED);
-                s.setEndedAt(LocalDateTime.now(ZoneOffset.UTC));
+                boolean tooNew = s.getCreatedAt() != null &&
+                        s.getCreatedAt().plusSeconds(30)
+                                .isAfter(LocalDateTime.now(ZoneOffset.UTC));
+                if (!tooNew) {
+                    s.setStatus(CallSessionStatus.ENDED);
+                    s.setEndedAt(LocalDateTime.now(ZoneOffset.UTC));
+                }
             }
             return groupCallSessionRepo.save(s);
         });

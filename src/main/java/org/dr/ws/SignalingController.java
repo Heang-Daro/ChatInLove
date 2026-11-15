@@ -207,10 +207,8 @@ public class SignalingController {
         // appears in the chat timeline for both online and future members.
         try {
             SendMessageRequest msgReq = new SendMessageRequest(
-                    // content encodes callSessionId + callType for the Flutter widget
                     "GROUP_CALL:" + gcs.getId() + ":" + callType,
-                    MessageType.CALL,
-                    null
+                    MessageType.CALL
             );
             messageService.sendMessage(conversationId, callerId, msgReq);
         } catch (Exception e) {

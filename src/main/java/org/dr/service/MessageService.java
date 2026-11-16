@@ -9,6 +9,7 @@ import org.dr.dto.response.MessageResponse;
 import org.dr.exception.ResourceNotFoundException;
 import org.dr.exception.UnauthorizedException;
 import org.dr.model.Conversation;
+import org.dr.model.ConversationMember;
 import org.dr.model.Message;
 import org.dr.model.User;
 import org.dr.model.enums.ConversationStatus;
@@ -18,14 +19,15 @@ import org.dr.repository.ConversationMemberRepository;
 import org.dr.repository.ConversationRepository;
 import org.dr.repository.MessageRepository;
 import org.dr.repository.UserRepository;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Slice;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -71,24 +73,24 @@ public class MessageService {
                 .content(storageUrlService.toAbsoluteUrl(request.content()))
                 .build();
         message = messageRepository.save(message);
-        conversation.setLastMessageAt(LocalDateTime.now(ZoneOffset.UTC));
-        conversationRepository.save(conversation);
         MessageResponse response = toResponse(message);
 
+        // The members are loaded with their user in ONE query (no N+1).
+        List<ConversationMember> members =
+                conversationMemberRepository.findActiveMembersWithUserOfConversation(conversationId);
+
         messagingTemplate.convertAndSend("/topic/conversations/" + conversationId, response);
-        if (conversation.getMembers() != null) {
-            for (var member : conversation.getMembers()) {
-                if (member.getLeftAt() == null && member.getUser() != null) {
-                    try {
-                        messagingTemplate.convertAndSendToUser(member.getUser().getId(), "/queue/private", response);
-                    } catch (Exception e) {
-                        log.warn("Could not notify user {}: {}", member.getUser().getId(), e.getMessage());
-                    }
+        for (var member : members) {
+            if (member.getLeftAt() == null && member.getUser() != null) {
+                try {
+                    messagingTemplate.convertAndSendToUser(member.getUser().getId(), "/queue/private", response);
+                } catch (Exception e) {
+                    log.warn("Could not notify user {}: {}", member.getUser().getId(), e.getMessage());
                 }
             }
         }
         if (conversation.getStatus() == ConversationStatus.PENDING) {
-            String recipientId = conversation.getMembers().stream()
+            String recipientId = members.stream()
                     .map(m -> m.getUser().getId())
                     .filter(id -> !id.equals(conversation.getRequesterId()))
                     .findFirst().orElse(null);
@@ -104,6 +106,10 @@ public class MessageService {
         } catch (Exception e) {
             log.warn("Could not broadcast typing stop notification: {}", e.getMessage());
         }
+
+        // Targeted update instead of re-writing the whole conversation
+        // aggregate (the collections would be re-checked on every flush).
+        conversationRepository.updateLastMessageAt(conversationId, LocalDateTime.now(ZoneOffset.UTC));
         return response;
     }
 
@@ -116,9 +122,21 @@ public class MessageService {
                         null, false, null, null, null, null));
     }
 
+    /**
+     * The messages of a conversation.
+     *
+     * <p>Three flavours, all of them without the expensive COUNT query
+     * ({@link Slice} instead of {@link Page}):
+     * <ul>
+     *   <li>{@code afterSequenceId != null} - delta sync: only the messages
+     *       that are newer than the given cursor, oldest first.</li>
+     *   <li>{@code before != null} - keyset pagination for "load older".</li>
+     *   <li>otherwise - the newest page.</li>
+     * </ul>
+     */
     @Transactional(readOnly = true)
-    public Page<MessageResponse> getConversationMessages(String conversationId, String userId,
-            LocalDateTime before, Pageable pageable) {
+    public Slice<MessageResponse> getConversationMessages(String conversationId, String userId,
+            LocalDateTime before, Long afterSequenceId, Pageable pageable) {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Conversation not found"));
         if (!conversationMemberRepository.existsByConversationIdAndUserIdAndLeftAtIsNull(conversationId, userId)) {
@@ -129,7 +147,14 @@ public class MessageService {
                     && !userId.equals(conversation.getRequesterId()))) {
             throw new UnauthorizedException("You cannot access this chat before accepting its request");
         }
-        if (before != null) return messageRepository.findByConversationIdBefore(conversationId, before, pageable).map(this::toResponse);
+        if (afterSequenceId != null) {
+            return messageRepository.findByConversationIdAfterSequence(conversationId, afterSequenceId, pageable)
+                    .map(this::toResponse);
+        }
+        if (before != null) {
+            return messageRepository.findByConversationIdBefore(conversationId, before, pageable)
+                    .map(this::toResponse);
+        }
         return messageRepository.findByConversationId(conversationId, pageable).map(this::toResponse);
     }
 
@@ -172,6 +197,7 @@ public class MessageService {
                 .editedAt(message.getEditedAt())
                 .deletedAt(message.getDeletedAt())
                 .relatedCallId(message.getRelatedCallId())
+                .sequenceId(message.getSequenceId())
                 .build();
     }
 

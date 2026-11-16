@@ -2,6 +2,7 @@ package org.dr.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.dr.dto.request.CreateGroupConversationRequest;
 import org.dr.dto.request.CreatePrivateConversationRequest;
 import org.dr.dto.request.SendMessageRequest;
@@ -10,9 +11,8 @@ import org.dr.dto.response.MessageResponse;
 import org.dr.model.User;
 import org.dr.service.ConversationService;
 import org.dr.service.MessageService;
-import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Slice;
 import org.springframework.data.web.PageableDefault;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
@@ -20,25 +20,71 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 
 @RestController
 @RequestMapping("/api/conversations")
 @RequiredArgsConstructor
+@Slf4j
 @CrossOrigin("*")
 public class ConversationController {
     private final ConversationService conversationService;
     private final MessageService messageService;
 
+    /**
+     * The conversations of the current user.
+     *
+     * <p>Returns a {@link Slice}: the response contains the same {@code content}
+     * array as before plus {@code last}/{@code hasNext}, but the expensive
+     * COUNT query is not executed any more.
+     *
+     * <p>Optional {@code since} (ISO-8601): only the conversations that changed
+     * since that timestamp - the delta sync of the clients.
+     */
     @GetMapping
-    public ResponseEntity<Page<ConversationResponse>> getConversations(@AuthenticationPrincipal User user,
-            @PageableDefault(size = 20, sort = "lastMessageAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(conversationService.getUserConversations(user.getId(), pageable));
+    public ResponseEntity<Slice<ConversationResponse>> getConversations(
+            @AuthenticationPrincipal User user,
+            @RequestParam(required = false) String since,
+            @PageableDefault(size = 20) Pageable pageable) {
+        return ResponseEntity.ok(
+                conversationService.getUserConversations(user.getId(), pageable, parseSince(since)));
+    }
+
+    /**
+     * Parses the optional {@code since} parameter.
+     *
+     * <p>The clients send an ISO-8601 timestamp with a zone
+     * ({@code 2026-11-16T07:00:00.000Z}); a local timestamp without a zone is
+     * accepted as well and interpreted as UTC. An unparsable value is ignored
+     * (the client then simply receives the full first page).
+     */
+    static LocalDateTime parseSince(String since) {
+        if (since == null || since.isBlank()) return null;
+        String value = since.trim();
+        try {
+            return LocalDateTime.ofInstant(Instant.parse(value), ZoneOffset.UTC);
+        } catch (Exception ignored) {
+            // not an instant - try the other ISO-8601 shapes
+        }
+        try {
+            return OffsetDateTime.parse(value).atZoneSameInstant(ZoneOffset.UTC).toLocalDateTime();
+        } catch (Exception ignored) {
+            // not an offset date time - try a local date time
+        }
+        try {
+            return LocalDateTime.parse(value);
+        } catch (Exception ignored) {
+            log.warn("Could not parse the 'since' parameter: {}", value);
+            return null;
+        }
     }
 
     @GetMapping("/requests")
-    public ResponseEntity<Page<ConversationResponse>> getRequests(@AuthenticationPrincipal User user,
-            @PageableDefault(size = 20, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
+    public ResponseEntity<Slice<ConversationResponse>> getRequests(@AuthenticationPrincipal User user,
+            @PageableDefault(size = 20) Pageable pageable) {
         return ResponseEntity.ok(conversationService.getPendingRequests(user.getId(), pageable));
     }
 
@@ -79,12 +125,21 @@ public class ConversationController {
         return ResponseEntity.ok(messageService.lastMessageByConversation(id));
     }
 
+    /**
+     * The messages of a conversation.
+     *
+     * <p>Optional {@code after} (the sequence id of the last known message):
+     * returns only the messages the client missed - the delta sync. Optional
+     * {@code before}: keyset pagination for "load older messages".
+     */
     @GetMapping("/{id}/messages")
-    public ResponseEntity<Page<MessageResponse>> getMessages(@PathVariable String id,
+    public ResponseEntity<Slice<MessageResponse>> getMessages(@PathVariable String id,
             @AuthenticationPrincipal User user,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime before,
-            @PageableDefault(size = 50, sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable) {
-        return ResponseEntity.ok(messageService.getConversationMessages(id, user.getId(), before, pageable));
+            @RequestParam(required = false) Long after,
+            @PageableDefault(size = 50) Pageable pageable) {
+        return ResponseEntity.ok(
+                messageService.getConversationMessages(id, user.getId(), before, after, pageable));
     }
 
     @PostMapping("/{id}/messages")

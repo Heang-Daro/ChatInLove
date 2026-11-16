@@ -12,7 +12,9 @@ import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 @Entity
 @Table(name="sessions")
 @Data
@@ -27,6 +29,8 @@ public class Session {
 	private String deviceName;
 	@ManyToOne(targetEntity = User.class)
 	@JoinColumn(name = "user_id")
+	@ToString.Exclude
+	@EqualsAndHashCode.Exclude
 	private User user;
 //	location on device login like x,y
 	private String mapX;

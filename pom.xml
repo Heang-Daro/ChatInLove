@@ -71,6 +71,14 @@
 			<scope>runtime</scope>
 		</dependency>
 
+		<!-- Flyway: schema migrations (indexes, delta-sync sequence) -->
+		<!-- Flyway 9 (managed by Spring Boot 3.2) ships the PostgreSQL support
+		     inside flyway-core. -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+
 		<!-- Database: MySQL (version is managed by Spring Boot) -->
 		<dependency>
 			<groupId>com.mysql</groupId>
@@ -121,6 +129,12 @@
 		<dependency>
 			<groupId>org.springframework.security</groupId>
 			<artifactId>spring-security-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+		<!-- Embedded database for the repository integration tests -->
+		<dependency>
+			<groupId>com.h2database</groupId>
+			<artifactId>h2</artifactId>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

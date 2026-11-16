@@ -4,7 +4,9 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 import org.dr.model.enums.MessageType;
 
 import java.time.LocalDateTime;
@@ -24,10 +26,14 @@ public class Message {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "conversation_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private Conversation conversation;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sender_id", nullable = false)
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
     private User sender;
 
     @Column(nullable = false)
@@ -53,6 +59,17 @@ public class Message {
 
     @Column(nullable = true)
     private String relatedCallId;  // For CALL type messages
+
+    /**
+     * Monotonic server-side cursor used for delta sync.
+     *
+     * <p>The value is assigned by the database (see migration
+     * {@code V2__performance_indexes_and_delta_sync.sql}), therefore the column
+     * is not insertable/updatable by Hibernate — otherwise the column would be
+     * written as NULL and the default would never fire.
+     */
+    @Column(name = "sequence_id", insertable = false, updatable = false)
+    private Long sequenceId;
 
     @PrePersist
     protected void onCreate() {

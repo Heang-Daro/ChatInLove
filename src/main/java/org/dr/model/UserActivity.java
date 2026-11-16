@@ -10,7 +10,9 @@ import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Entity
 @Table(name="user_activities")
@@ -25,6 +27,8 @@ public class UserActivity {
 	private boolean isOnline;
 	@JoinColumn(name = "user_id")
 	@OneToOne
+	@ToString.Exclude
+	@EqualsAndHashCode.Exclude
 	private User user;
 
 }

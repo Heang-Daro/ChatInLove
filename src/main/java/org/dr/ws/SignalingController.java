@@ -7,6 +7,7 @@ import org.dr.model.GroupCallSession;
 import org.dr.model.enums.CallSessionStatus;
 import org.dr.model.enums.MessageType;
 import org.dr.repository.ConversationRepository;
+import org.dr.repository.UserRepository;
 import org.dr.service.CallSessionService;
 import org.dr.service.FcmService;
 import org.dr.service.MessageService;
@@ -52,6 +53,7 @@ public class SignalingController {
 
     private final SimpMessagingTemplate   messaging;
     private final ConversationRepository  conversationRepository;
+    private final UserRepository          userRepository;
     private final CallSessionService      callSessionService;
     private final PresenceService         presenceService;
     private final FcmService              fcmService;
@@ -101,23 +103,26 @@ public class SignalingController {
         String sdpOffer   = extractSdp(payload);
         String convId     = payload.getOrDefault("conversationId", "").toString();
 
-        // Persist call session for missed-call recovery.
         CallSession session = callSessionService.createCallSession(
                 callerId, receiverId, sdpOffer, callType);
 
-        // Attach session ID so receiver can accept/reject it.
         payload.put("callSessionId", session.getId());
 
-        if (presenceService.isOnline(receiverId)) {
-            // Receiver is online — deliver via WebSocket.
-            messaging.convertAndSendToUser(receiverId, "/queue/signal", payload);
-        } else {
-            // Receiver is offline — send FCM push.
-            // Note: FCM token lookup requires a separate token store.
-            // Here we log and send with an empty token (no-op in FcmService).
-            log.info("[Signal] Receiver {} is offline — sending FCM push for call {}",
-                    receiverId, session.getId());
-            fcmService.sendIncomingCallPush("", callerId, session.getId(), callType);
+        String callerName = callerId;
+        var callerOpt = userRepository.findById(callerId);
+        if (callerOpt.isPresent()) {
+            callerName = callerOpt.get().getUsername();
+        }
+
+        // Deliver via STOMP socket
+        messaging.convertAndSendToUser(receiverId, "/queue/signal", payload);
+
+        // Send high-priority FCM data push to wake up device in killed/background state
+        var receiverOpt = userRepository.findById(receiverId);
+        if (receiverOpt.isPresent() && receiverOpt.get().getFcmToken() != null) {
+            String fcmToken = receiverOpt.get().getFcmToken();
+            log.info("[Signal] Sending high-priority FCM call push to receiver {} (token={})", receiverId, fcmToken);
+            fcmService.sendIncomingCallPush(fcmToken, callerId, callerName, session.getId(), convId, callType, false);
         }
     }
 
@@ -130,6 +135,9 @@ public class SignalingController {
             callSessionService.acceptCall(sessionId, receiverId);
         }
         messaging.convertAndSendToUser(callerId, "/queue/signal", payload);
+        if (!sessionId.isBlank()) {
+            messaging.convertAndSend("/topic/call/" + sessionId, payload);
+        }
     }
 
     // ── CALL_REJECT ───────────────────────────────────────────────────────────

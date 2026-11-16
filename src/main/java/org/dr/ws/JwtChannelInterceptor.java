@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 import org.dr.model.User;
@@ -87,7 +88,7 @@ public class JwtChannelInterceptor implements ChannelInterceptor {
         if (session == null || session.isRevoked()) {
             throw new MessagingException("Session revoked - login required");
         }
-        if (!session.getExpiresAt().isAfter(LocalDateTime.now())) {
+        if (!session.getExpiresAt().isAfter(LocalDateTime.now(ZoneOffset.UTC))) {
             throw new MessagingException("Session expired - login required");
         }
 

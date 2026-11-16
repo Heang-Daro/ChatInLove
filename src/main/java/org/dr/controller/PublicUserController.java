@@ -58,4 +58,21 @@ public class PublicUserController {
                     u.getId(), u.getUsername(), u.getProfileImageUrl(), online, lastSeen));
         }).orElse(ResponseEntity.notFound().build());
     }
+
+    /** POST /api/users/fcm-token — update current user's FCM registration token */
+    @PostMapping("/fcm-token")
+    public ResponseEntity<Void> updateFcmToken(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal User principal,
+            @RequestBody java.util.Map<String, String> body) {
+        if (principal == null) return ResponseEntity.status(401).build();
+        String token = body.get("fcmToken");
+        if (token != null && !token.isBlank()) {
+            User user = repository.findById(principal.getId()).orElse(null);
+            if (user != null) {
+                user.setFcmToken(token.trim());
+                repository.save(user);
+            }
+        }
+        return ResponseEntity.ok().build();
+    }
 }

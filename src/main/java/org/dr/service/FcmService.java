@@ -1,21 +1,15 @@
 package org.dr.service;
 
-import com.google.firebase.messaging.FirebaseMessaging;
-import com.google.firebase.messaging.FirebaseMessagingException;
-import com.google.firebase.messaging.Message;
-import com.google.firebase.messaging.Notification;
+import com.google.firebase.messaging.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Firebase Cloud Messaging service for push notifications.
- *
- * To send push notifications to offline users, the Flutter client must register
- * its FCM token and send it to the server (e.g. POST /api/auth/fcm-token).
- * This service uses that stored token to deliver a data-only push so the app
- * can display the incoming call UI from the background.
+ * Firebase Cloud Messaging service for real-time high-priority push notifications.
+ * Sends data-only messages with priority("HIGH") and ttl(0) so devices wake up instantly.
  */
 @Service
 @Slf4j
@@ -23,62 +17,62 @@ public class FcmService {
 
     /**
      * Send a high-priority incoming call push to a device.
-     *
-     * @param fcmToken   the recipient's device FCM registration token
-     * @param callerId   display name or ID of the caller
-     * @param callSessionId  the call session ID so the app can answer/reject
-     * @param callType   "AUDIO" or "VIDEO"
      */
-    public void sendIncomingCallPush(String fcmToken, String callerId,
-                                     String callSessionId, String callType) {
+    public void sendIncomingCallPush(String fcmToken, String callerId, String callerName,
+                                     String callSessionId, String conversationId, String callType, boolean isGroup) {
         if (fcmToken == null || fcmToken.isBlank()) {
-            log.debug("[FCM] No token for user — skipping push");
+            log.debug("[FCM] No token provided for call push — skipping");
             return;
         }
+
+        Map<String, String> data = new HashMap<>();
+        data.put("type", "INCOMING_CALL");
+        data.put("callId", callSessionId != null ? callSessionId : "");
+        data.put("callSessionId", callSessionId != null ? callSessionId : "");
+        data.put("conversationId", conversationId != null ? conversationId : "");
+        data.put("fromUserId", callerId != null ? callerId : "");
+        data.put("callerUserId", callerId != null ? callerId : "");
+        data.put("callerName", callerName != null ? callerName : "Caller");
+        data.put("callType", callType != null ? callType : "AUDIO");
+        data.put("isVideo", String.valueOf("VIDEO".equalsIgnoreCase(callType)));
+        data.put("isGroup", String.valueOf(isGroup));
+
+        sendHighPriorityDataPush(fcmToken, data);
+    }
+
+    /**
+     * Sends a data-only payload with HIGH priority and TTL(0).
+     */
+    public void sendHighPriorityDataPush(String fcmToken, Map<String, String> data) {
+        if (fcmToken == null || fcmToken.isBlank()) return;
+
         try {
             Message msg = Message.builder()
                     .setToken(fcmToken)
-                    // Data-only payload so the Flutter app can handle it in background.
-                    .putAllData(Map.of(
-                            "type",          "INCOMING_CALL",
-                            "callerId",      callerId,
-                            "callSessionId", callSessionId,
-                            "callType",      callType
-                    ))
-                    // High-priority so the OS wakes the app.
-                    .setAndroidConfig(com.google.firebase.messaging.AndroidConfig.builder()
-                            .setPriority(com.google.firebase.messaging.AndroidConfig.Priority.HIGH)
+                    .putAllData(data)
+                    // Android: Priority HIGH + TTL 0 (deliver immediately or drop)
+                    .setAndroidConfig(AndroidConfig.builder()
+                            .setPriority(AndroidConfig.Priority.HIGH)
+                            .setTtl(0)
                             .build())
-                    .setApnsConfig(com.google.firebase.messaging.ApnsConfig.builder()
-                            .setAps(com.google.firebase.messaging.Aps.builder()
+                    // iOS: High-priority background APNs config
+                    .setApnsConfig(ApnsConfig.builder()
+                            .putHeader("apns-priority", "10")
+                            .putHeader("apns-push-type", "background")
+                            .setAps(Aps.builder()
                                     .setContentAvailable(true)
                                     .build())
                             .build())
                     .build();
 
             String response = FirebaseMessaging.getInstance().send(msg);
-            log.info("[FCM] Incoming call push sent to {} → messageId={}", fcmToken, response);
+            log.info("[FCM] High-priority data push sent to {} → messageId={}", fcmToken, response);
         } catch (FirebaseMessagingException e) {
-            log.warn("[FCM] Failed to send call push: {}", e.getMessage());
+            log.warn("[FCM] Failed to send push to {}: {}", fcmToken, e.getMessage());
         }
     }
 
-    /**
-     * Send a generic data push (e.g. group call invite in chat).
-     */
     public void sendDataPush(String fcmToken, Map<String, String> data) {
-        if (fcmToken == null || fcmToken.isBlank()) return;
-        try {
-            Message msg = Message.builder()
-                    .setToken(fcmToken)
-                    .putAllData(data)
-                    .setAndroidConfig(com.google.firebase.messaging.AndroidConfig.builder()
-                            .setPriority(com.google.firebase.messaging.AndroidConfig.Priority.HIGH)
-                            .build())
-                    .build();
-            FirebaseMessaging.getInstance().send(msg);
-        } catch (FirebaseMessagingException e) {
-            log.warn("[FCM] Failed to send data push: {}", e.getMessage());
-        }
+        sendHighPriorityDataPush(fcmToken, data);
     }
 }

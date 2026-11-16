@@ -45,6 +45,10 @@ public class User implements UserDetails {
     @Column(nullable = true, length = 2048)
     private String foregroundImageUrl;
 
+    /** Firebase Cloud Messaging registration token for push notifications. */
+    @Column(nullable = true, length = 1024)
+    private String fcmToken;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UserRole role;

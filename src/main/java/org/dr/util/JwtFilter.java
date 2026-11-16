@@ -18,6 +18,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 
 @Component
 @RequiredArgsConstructor
@@ -90,7 +91,7 @@ public class JwtFilter extends OncePerRequestFilter {
                 log.warn("JWT rejected: session {} is revoked", sessionId);
                 return;
             }
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(ZoneOffset.UTC);
             if (!session.getExpiresAt().isAfter(now)) {
                 log.warn("JWT rejected: session {} expired at {}", sessionId, session.getExpiresAt());
                 return;

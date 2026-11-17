@@ -2,6 +2,8 @@ package org.dr.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+
+import org.dr.dto.request.AcceptCallRequest;
 import org.dr.model.CallSession;
 import org.dr.model.User;
 import org.dr.repository.CallSessionRepository;
@@ -22,133 +24,137 @@ import java.util.Optional;
 @Slf4j
 public class CallController {
 
-    private final CallSessionService callSessionService;
-    private final CallSessionRepository callSessionRepository;
-    private final SimpMessagingTemplate messagingTemplate;
+	private final CallSessionService callSessionService;
+	private final CallSessionRepository callSessionRepository;
+	private final SimpMessagingTemplate messagingTemplate;
 
-    /**
-     * Synchronous HTTP endpoint to accept a call.
-     * Guarantees caller's ringing stops immediately even if WebRTC or socket is reconnecting.
-     */
-    @PostMapping("/accept/{sessionId}")
-    public ResponseEntity<Map<String, Object>> acceptCall(
-            @PathVariable String sessionId,
-            @AuthenticationPrincipal User user) {
+	/**
+	 * Synchronous HTTP endpoint to accept a call. Guarantees caller's ringing stops
+	 * immediately even if WebRTC or socket is reconnecting.
+	 */
+	@PostMapping("/accept/{sessionId}")
+	public ResponseEntity<Map<String, Object>> acceptCall(@PathVariable String sessionId,
+			@RequestBody(required = false) AcceptCallRequest request, @AuthenticationPrincipal User user) {
 
-        if (user == null) return ResponseEntity.status(401).build();
-        String calleeId = user.getId();
+		if (user == null)
+			return ResponseEntity.status(401).build();
+		String calleeId = user.getId();
 
-        Optional<CallSession> sessionOpt = callSessionService.acceptCall(sessionId, calleeId);
-        if (sessionOpt.isEmpty()) {
-            // Check fallback repository lookup
-            sessionOpt = callSessionRepository.findById(sessionId);
-        }
+		Optional<CallSession> sessionOpt = callSessionService.acceptCall(sessionId, calleeId);
+		if (sessionOpt.isEmpty()) {
+			sessionOpt = callSessionRepository.findById(sessionId);
+		}
 
-        if (sessionOpt.isPresent()) {
-            CallSession session = sessionOpt.get();
-            String callerId = session.getCallerId();
+		if (sessionOpt.isPresent()) {
+			CallSession session = sessionOpt.get();
+			String callerId = session.getCallerId();
 
-            Map<String, Object> signal = new HashMap<>();
-            signal.put("type", "CALL_ANSWER");
-            signal.put("callSessionId", sessionId);
-            signal.put("fromUserId", calleeId);
-            signal.put("callerUserId", callerId);
-            signal.put("status", "ACTIVE");
+			Map<String, Object> signal = new HashMap<>();
+			signal.put("type", "CALL_ANSWER");
+			signal.put("callSessionId", sessionId);
+			signal.put("fromUserId", calleeId);
+			signal.put("callerUserId", callerId);
+			signal.put("status", "ACTIVE");
 
-            // Broadcast to caller's private signal queue
-            messagingTemplate.convertAndSendToUser(callerId, "/queue/signal", signal);
+			// ប្រសិនបើ Flutter ផ្ញើ SDP Answer មកជាមួយ ត្រូវแนบចូលក្នុង Signal ភ្លាមៗ
+			if (request != null && request.getSdp() != null) {
+				signal.put("sdp", request.getSdp());
+				log.info("[CallController] SDP Answer included in accept request for session {}", sessionId);
+			}
 
-            // Broadcast on room call topic
-            messagingTemplate.convertAndSend("/topic/call/" + sessionId, signal);
+			// Broadcast to caller's private signal queue
+			messagingTemplate.convertAndSendToUser(callerId, "/queue/signal", signal);
 
-            log.info("[CallController] Call session {} accepted by {}", sessionId, calleeId);
+			// Broadcast on room call topic
+			messagingTemplate.convertAndSend("/topic/call/" + sessionId, signal);
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("status", "SUCCESS");
-            response.put("callSessionId", sessionId);
-            response.put("callerId", callerId);
-            return ResponseEntity.ok(response);
-        }
+			log.info("[CallController] Call session {} accepted by {} with SDP broadcasted", sessionId, calleeId);
 
-        return ResponseEntity.notFound().build();
-    }
+			Map<String, Object> response = new HashMap<>();
+			response.put("status", "SUCCESS");
+			response.put("callSessionId", sessionId);
+			response.put("callerId", callerId);
+			return ResponseEntity.ok(response);
+		}
 
-    /**
-     * Synchronous HTTP endpoint to reject a call.
-     */
-    @PostMapping("/reject/{sessionId}")
-    public ResponseEntity<Map<String, Object>> rejectCall(
-            @PathVariable String sessionId,
-            @AuthenticationPrincipal User user) {
+		return ResponseEntity.notFound().build();
+	}
 
-        if (user == null) return ResponseEntity.status(401).build();
-        String calleeId = user.getId();
+	/**
+	 * Synchronous HTTP endpoint to reject a call.
+	 */
+	@PostMapping("/reject/{sessionId}")
+	public ResponseEntity<Map<String, Object>> rejectCall(@PathVariable String sessionId,
+			@AuthenticationPrincipal User user) {
 
-        Optional<CallSession> sessionOpt = callSessionService.rejectCall(sessionId, calleeId);
-        if (sessionOpt.isEmpty()) {
-            sessionOpt = callSessionRepository.findById(sessionId);
-        }
+		if (user == null)
+			return ResponseEntity.status(401).build();
+		String calleeId = user.getId();
 
-        if (sessionOpt.isPresent()) {
-            CallSession session = sessionOpt.get();
-            String callerId = session.getCallerId();
+		Optional<CallSession> sessionOpt = callSessionService.rejectCall(sessionId, calleeId);
+		if (sessionOpt.isEmpty()) {
+			sessionOpt = callSessionRepository.findById(sessionId);
+		}
 
-            Map<String, Object> signal = new HashMap<>();
-            signal.put("type", "CALL_REJECT");
-            signal.put("callSessionId", sessionId);
-            signal.put("fromUserId", calleeId);
+		if (sessionOpt.isPresent()) {
+			CallSession session = sessionOpt.get();
+			String callerId = session.getCallerId();
 
-            messagingTemplate.convertAndSendToUser(callerId, "/queue/signal", signal);
-            messagingTemplate.convertAndSend("/topic/call/" + sessionId, signal);
+			Map<String, Object> signal = new HashMap<>();
+			signal.put("type", "CALL_REJECT");
+			signal.put("callSessionId", sessionId);
+			signal.put("fromUserId", calleeId);
 
-            log.info("[CallController] Call session {} rejected by {}", sessionId, calleeId);
+			messagingTemplate.convertAndSendToUser(callerId, "/queue/signal", signal);
+			messagingTemplate.convertAndSend("/topic/call/" + sessionId, signal);
 
-            return ResponseEntity.ok(Map.of("status", "REJECTED"));
-        }
+			log.info("[CallController] Call session {} rejected by {}", sessionId, calleeId);
 
-        return ResponseEntity.notFound().build();
-    }
+			return ResponseEntity.ok(Map.of("status", "REJECTED"));
+		}
 
-    /**
-     * Synchronous HTTP endpoint to hang up a call.
-     */
-    @PostMapping("/hangup/{sessionId}")
-    public ResponseEntity<Map<String, Object>> hangupCall(
-            @PathVariable String sessionId,
-            @AuthenticationPrincipal User user) {
+		return ResponseEntity.notFound().build();
+	}
 
-        if (user == null) return ResponseEntity.status(401).build();
-        String userId = user.getId();
+	/**
+	 * Synchronous HTTP endpoint to hang up a call.
+	 */
+	@PostMapping("/hangup/{sessionId}")
+	public ResponseEntity<Map<String, Object>> hangupCall(@PathVariable String sessionId,
+			@AuthenticationPrincipal User user) {
 
-        Optional<CallSession> sessionOpt = callSessionService.endCall(sessionId, userId);
-        if (sessionOpt.isEmpty()) {
-            sessionOpt = callSessionRepository.findById(sessionId);
-        }
+		if (user == null)
+			return ResponseEntity.status(401).build();
+		String userId = user.getId();
 
-        if (sessionOpt.isPresent()) {
-            CallSession session = sessionOpt.get();
-            String targetId = session.getCallerId().equals(userId) ? session.getReceiverId() : session.getCallerId();
+		Optional<CallSession> sessionOpt = callSessionService.endCall(sessionId, userId);
+		if (sessionOpt.isEmpty()) {
+			sessionOpt = callSessionRepository.findById(sessionId);
+		}
 
-            Map<String, Object> signal = new HashMap<>();
-            signal.put("type", "CALL_HANGUP");
-            signal.put("callSessionId", sessionId);
-            signal.put("fromUserId", userId);
+		if (sessionOpt.isPresent()) {
+			CallSession session = sessionOpt.get();
+			String targetId = session.getCallerId().equals(userId) ? session.getReceiverId() : session.getCallerId();
 
-            if (targetId != null) {
-                messagingTemplate.convertAndSendToUser(targetId, "/queue/signal", signal);
-            }
-            messagingTemplate.convertAndSend("/topic/call/" + sessionId, signal);
+			Map<String, Object> signal = new HashMap<>();
+			signal.put("type", "CALL_HANGUP");
+			signal.put("callSessionId", sessionId);
+			signal.put("fromUserId", userId);
 
-            return ResponseEntity.ok(Map.of("status", "ENDED"));
-        }
+			if (targetId != null) {
+				messagingTemplate.convertAndSendToUser(targetId, "/queue/signal", signal);
+			}
+			messagingTemplate.convertAndSend("/topic/call/" + sessionId, signal);
 
-        return ResponseEntity.notFound().build();
-    }
+			return ResponseEntity.ok(Map.of("status", "ENDED"));
+		}
 
-    @GetMapping("/session/{sessionId}")
-    public ResponseEntity<CallSession> getCallSession(@PathVariable String sessionId) {
-        return callSessionRepository.findById(sessionId)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
-    }
+		return ResponseEntity.notFound().build();
+	}
+
+	@GetMapping("/session/{sessionId}")
+	public ResponseEntity<CallSession> getCallSession(@PathVariable String sessionId) {
+		return callSessionRepository.findById(sessionId).map(ResponseEntity::ok)
+				.orElse(ResponseEntity.notFound().build());
+	}
 }

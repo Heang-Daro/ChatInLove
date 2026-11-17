@@ -42,6 +42,7 @@ public class SecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                 .requestMatchers("/error", "/ws/**", "/chat", "/uploads/**").permitAll()
                 .requestMatchers("/storage/v1/object/public/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/media/stream/**", "/api/media/hls/**").permitAll()
                 .anyRequest().authenticated()
             )
             .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {

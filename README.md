@@ -160,7 +160,7 @@ chat-love-in/
 
 1. **Clone and navigate:**
    ```bash
-   cd chat-love-in
+   cd ChatInLove
    ```
 
 2. **Setup database:**
@@ -177,12 +177,22 @@ chat-love-in/
      postgres:15
    ```
 
-3. **Configure application.properties:**
-   ```properties
-   spring.datasource.url=jdbc:postgresql://localhost:5432/chatinlove
-   spring.datasource.username=postgres
-   spring.datasource.password=postgres
+3. **Configure the database and JWT:**
    
+   `src/main/resources/application.properties` reads the following environment
+   variables. Set them in your shell or deployment provider instead of
+   committing credentials:
+
+   ```bash
+   export SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/chatinlove'
+   export SPRING_DATASOURCE_USERNAME=postgres
+   export SPRING_DATASOURCE_PASSWORD=postgres
+   export APP_FIREBASE_CREDENTIALS_JSON='...'
+   ```
+
+   Set a production JWT secret in the configuration used by your environment:
+
+   ```properties
    app.jwt.secret=your-secret-key-min-32-chars
    app.jwt.expiration-minutes=15
    app.jwt.refresh-expiration-days=7
@@ -190,15 +200,16 @@ chat-love-in/
 
 4. **Build and run:**
    ```bash
-   mvn clean package
-   mvn spring-boot:run
+   bash mvnw clean package
+   bash mvnw spring-boot:run
    ```
 
-   Server starts on `http://localhost:8080`
+   The server starts on `http://localhost:2026` by default. Set `PORT` to
+   override it.
 
 5. **Test endpoint:**
    ```bash
-   curl http://localhost:8080/api/auth/principal \
+   curl http://localhost:2026/api/auth/principal \
      -H "Authorization: Bearer {token}"
    ```
 
@@ -365,7 +376,7 @@ All IDs are UUIDs (String type) for security and scalability.
 ### Test REST API
 ```bash
 # Register
-curl -X POST http://localhost:8080/api/auth/register \
+curl -X POST http://localhost:2026/api/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
@@ -374,7 +385,7 @@ curl -X POST http://localhost:8080/api/auth/register \
   }'
 
 # Login
-curl -X POST http://localhost:8080/api/auth/login \
+curl -X POST http://localhost:2026/api/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
@@ -382,14 +393,14 @@ curl -X POST http://localhost:8080/api/auth/login \
   }'
 
 # Get conversations (use returned accessToken)
-curl http://localhost:8080/api/conversations \
+curl http://localhost:2026/api/conversations \
   -H "Authorization: Bearer {accessToken}"
 ```
 
 ### Test WebSocket
 Use browser DevTools or Postman WebSocket client:
 ```
-URL: ws://localhost:8080/ws
+URL: ws://localhost:2026/chat
 Header: Authorization: Bearer {accessToken}
 ```
 
@@ -409,7 +420,7 @@ Header: Authorization: Bearer {accessToken}
 
 ### WebSocket Connection Failed
 ```
-Problem: Can't connect to /ws
+Problem: Can't connect to /chat
 Solution: Check JWT is valid, Authorization header format: "Bearer {token}"
 ```
 
@@ -438,7 +449,7 @@ Solution:
 
 ## 📋 Roadmap
 
-### ✅ Completed (Phase 1)
+### ✅ Completed
 - [x] Authentication with device sessions
 - [x] JWT token management
 - [x] 1-to-1 conversations
@@ -447,30 +458,24 @@ Solution:
 - [x] Message editing/deletion
 - [x] Read status tracking
 
-### 🔄 In Progress (Phase 2)
-- [ ] Group conversations
-- [ ] Invite system
-- [ ] Invite links with expiry
-- [ ] 1-to-1 WebRTC calls
-- [ ] STUN/TURN server integration
-- [ ] Call history and records
+### ✅ Also implemented
+- [x] Group conversations and invitations
+- [x] Invite links with expiry
+- [x] 1-to-1 and group WebRTC signaling
+- [x] Call sessions and push notifications
+- [x] File uploads and media streaming
 
-### 📅 Future (Phase 3)
-- [ ] Group calls with SFU
-- [ ] Voice messages
-- [ ] File sharing
-- [ ] Push notifications
-- [ ] Message search
-- [ ] Message reactions
-- [ ] User blocking
-- [ ] Admin dashboard
+### 📅 Planned
+- [ ] STUN/TURN and SFU production infrastructure
+- [ ] Message search and reactions
+- [ ] User blocking and admin dashboard
 
 ---
 
 ## 📞 Support
 
 ### Check These First
-1. Is the backend running? `mvn spring-boot:run`
+1. Is the backend running? `bash mvnw spring-boot:run`
 2. Is PostgreSQL running? `psql -U postgres -d chatinlove`
 3. Is the JWT token valid? Check expiry time
 4. Are WebSocket headers correct? Check Authorization format
@@ -480,7 +485,7 @@ Solution:
 ### Common Fixes
 ```bash
 # Clean build if facing compilation errors
-mvn clean compile
+bash mvnw clean compile
 
 # Rebuild database schema
 # (Update SQL in application.properties: ddl-auto=create)
@@ -531,5 +536,111 @@ This project is part of the chatInLove application suite.
 
 **Built with ❤️ using Spring Boot 3, Java 17, PostgreSQL**
 
-**Last Updated:** October 7, 2026  
+**Last Updated:** November 18, 2026
 **Version:** 1.0.0-SNAPSHOT
+
+## Architecture
+
+The backend separates HTTP resource operations from real-time messaging. JWT
+authentication protects REST requests through `JwtFilter` and authenticates
+STOMP `CONNECT` frames through `JwtChannelInterceptor`. Controllers delegate
+business rules to services, which persist users, conversations, messages,
+sessions, calls, and upload metadata through JPA repositories. Flyway applies
+database migrations before the application serves requests.
+
+```mermaid
+classDiagram
+    class AuthController
+    class ConversationController
+    class ChatSocketController
+    class SignalingController
+    class JwtFilter
+    class JwtChannelInterceptor
+    class AuthenticationService
+    class ConversationService
+    class MessageService
+    class CallSessionService
+    class JPARepositories
+    class PostgreSQL
+    class STOMPBroker
+    class WebRTCClients
+
+    AuthController --> AuthenticationService
+    ConversationController --> ConversationService
+    ConversationController --> MessageService
+    ChatSocketController --> MessageService
+    SignalingController --> CallSessionService
+    JwtFilter --> AuthController
+    JwtChannelInterceptor --> ChatSocketController
+    JwtChannelInterceptor --> SignalingController
+    AuthenticationService --> JPARepositories
+    ConversationService --> JPARepositories
+    MessageService --> JPARepositories
+    CallSessionService --> JPARepositories
+    JPARepositories --> PostgreSQL
+    ChatSocketController --> STOMPBroker
+    SignalingController --> STOMPBroker
+    WebRTCClients --> STOMPBroker
+```
+
+### Request and call flows
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant REST as REST Controller
+    participant Service
+    participant DB as PostgreSQL
+    participant WS as STOMP /chat
+    participant Peer as WebRTC Peer
+
+    Client->>REST: POST /api/auth/login
+    REST->>Service: authenticate credentials
+    Service->>DB: load user and device session
+    DB-->>Service: user/session
+    Service-->>Client: access + refresh tokens
+    Client->>WS: STOMP CONNECT with Bearer token
+    Client->>WS: /app/chat.send/{conversationId}
+    WS->>Service: validate membership and save message
+    Service->>DB: persist message
+    WS-->>Client: /topic/conversations/{conversationId}
+    Client->>WS: /app/signal/{targetUserId}
+    WS-->>Peer: /user/{targetUserId}/queue/signal
+    Client<<->>Peer: WebRTC media after offer/answer/ICE
+```
+
+## Problems and solutions
+
+| Problem | Solution in this backend |
+| --- | --- |
+| REST requests and WebSocket messages need the same authenticated identity. | `JwtFilter` validates REST Bearer tokens, while `JwtChannelInterceptor` validates the Bearer token in the STOMP `CONNECT` frame. |
+| Messages must be durable but also arrive immediately. | `MessageService` persists through JPA, and `ChatSocketController` broadcasts the saved response to conversation topics and user queues. |
+| WebRTC media should not pass through the application server. | `SignalingController` relays offers, answers, and ICE candidates over STOMP; peers exchange the audio/video stream directly. |
+| Users may connect from several devices or reconnect after a missed call. | Device sessions and `CallSessionService` persist session state, while presence and FCM services replay or notify about incoming calls. |
+| Large media uploads can exceed a single request or need later playback. | Chunked upload endpoints, resumable sessions, and media streaming/HLS controllers handle uploads and playback separately from chat messages. |
+
+## Deployment and tests
+
+`Dockerfile` builds the application with Maven and runs the Java 17 image.
+`render.yaml` deploys that image as the `chat-love-in` web service. Render
+sets `PORT=10000`; the application reads `PORT`, so the same image works
+locally with the default `2026` or on Render without changing source code.
+
+```bash
+docker build -t chat-love-in .
+docker run --rm -p 2026:2026 \
+  -e SPRING_DATASOURCE_URL='jdbc:postgresql://host.docker.internal:5432/chatinlove' \
+  -e SPRING_DATASOURCE_USERNAME=postgres \
+  -e SPRING_DATASOURCE_PASSWORD=postgres \
+  chat-love-in
+```
+
+Run the automated tests with:
+
+```bash
+bash mvnw test
+```
+
+The test profile uses an embedded H2 database
+(`src/test/resources/application.properties`); production uses PostgreSQL and
+Flyway migrations.

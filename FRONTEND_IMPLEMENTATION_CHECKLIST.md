@@ -10,8 +10,8 @@ Use this checklist to ensure your frontend implementation is complete and correc
 - [ ] Node.js 16+ installed
 - [ ] React/Angular/Vue project created
 - [ ] `.env` file created with:
-  - [ ] `VITE_API_URL=http://localhost:8080/api`
-  - [ ] `VITE_WS_URL=ws://localhost:8080/ws`
+  - [ ] `VITE_API_URL=http://localhost:2026/api`
+  - [ ] `VITE_WS_URL=ws://localhost:2026/chat`
 - [ ] Dependencies installed: `npm install @stomp/stompjs axios`
 
 ### API Client

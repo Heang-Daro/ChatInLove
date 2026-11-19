@@ -337,7 +337,7 @@ Authorization: Bearer {accessToken}
 ## WebSocket/STOMP Endpoints
 
 ### Connection
-**Endpoint:** `ws://localhost:8080/ws`
+**Endpoint:** `ws://localhost:2026/chat`
 
 **Headers (STOMP CONNECT):**
 ```
@@ -347,7 +347,7 @@ Authorization: Bearer {accessToken}
 **Example (JavaScript):**
 ```javascript
 const client = new StompJs.Client({
-  brokerURL: 'ws://localhost:8080/ws',
+  brokerURL: 'ws://localhost:2026/chat',
   connectHeaders: {
     'Authorization': `Bearer ${accessToken}`
   },
@@ -461,7 +461,7 @@ client.subscribe('/user/queue/notifications', (message) => {
 
 ```javascript
 // 1. Register
-const registerResponse = await fetch('http://localhost:8080/api/auth/register', {
+const registerResponse = await fetch('http://localhost:2026/api/auth/register', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({
@@ -484,7 +484,7 @@ const headers = {
 };
 
 // 4. When token expires, refresh it
-const refreshResponse = await fetch('http://localhost:8080/api/auth/refresh', {
+const refreshResponse = await fetch('http://localhost:2026/api/auth/refresh', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
   body: JSON.stringify({ refreshToken })
@@ -503,7 +503,7 @@ class ChatClient {
   constructor(accessToken) {
     this.accessToken = accessToken;
     this.client = new StompJs.Client({
-      brokerURL: 'ws://localhost:8080/ws',
+      brokerURL: 'ws://localhost:2026/chat',
       connectHeaders: {
         'Authorization': `Bearer ${accessToken}`
       }
@@ -623,9 +623,9 @@ chat.sendTypingNotification('conv-uuid-1');
 2. **Update application.properties:**
    ```properties
    # Database
-   spring.datasource.url=jdbc:postgresql://localhost:5432/chatinlove
-   spring.datasource.username=postgres
-   spring.datasource.password=postgres
+   export SPRING_DATASOURCE_URL='jdbc:postgresql://localhost:5432/chatinlove'
+   export SPRING_DATASOURCE_USERNAME=postgres
+   export SPRING_DATASOURCE_PASSWORD=postgres
    
    # JWT
    app.jwt.secret=your-secret-key-min-32-chars
@@ -635,16 +635,16 @@ chat.sendTypingNotification('conv-uuid-1');
 
 3. **Build:**
    ```bash
-   mvn clean package
+   bash mvnw clean package
    ```
 
 4. **Run:**
    ```bash
-   mvn spring-boot:run
+   bash mvnw spring-boot:run
    ```
 
-Server runs on `http://localhost:8080`
-WebSocket endpoint: `ws://localhost:8080/ws`
+Server runs on `http://localhost:2026` by default (`PORT` can override it).
+WebSocket endpoint: `ws://localhost:2026/chat`
 
 ### Frontend Setup (React/Angular/Vue)
 
@@ -655,8 +655,8 @@ WebSocket endpoint: `ws://localhost:8080/ws`
 
 2. **Create API client:**
    ```javascript
-   const API_BASE = 'http://localhost:8080/api';
-   const WS_URL = 'ws://localhost:8080/ws';
+   const API_BASE = 'http://localhost:2026/api';
+   const WS_URL = 'ws://localhost:2026/chat';
    ```
 
 3. **Implement authentication interceptor** to attach Bearer token to all requests
@@ -682,7 +682,7 @@ WebSocket endpoint: `ws://localhost:8080/ws`
 ### WebSocket Connection Issues
 - Ensure JWT token is valid and not expired
 - Check CORS settings if frontend is on different origin
-- Verify `/ws` endpoint is accessible
+- Verify `/chat` endpoint is accessible
 
 ### Message Not Sending
 - Verify user is active member of conversation

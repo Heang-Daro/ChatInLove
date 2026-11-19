@@ -4,8 +4,8 @@ This document defines the exact protocol and message formats that the frontend s
 
 ## Quick Reference
 
-**Backend Server:** `http://localhost:8080`
-**WebSocket:** `ws://localhost:8080/ws`
+**Backend Server:** `http://localhost:2026`
+**WebSocket:** `ws://localhost:2026/chat`
 **API Base:** `/api`
 
 ---
@@ -113,7 +113,7 @@ Content-Type: application/json
    ↓
 2. Set Connection Headers (Authorization)
    ↓
-3. Connect to ws://localhost:8080/ws
+3. Connect to ws://localhost:2026/chat
    ↓
 4. Server validates JWT in CONNECT frame
    ↓

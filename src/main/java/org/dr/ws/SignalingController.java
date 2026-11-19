@@ -167,9 +167,10 @@ public class SignalingController {
                                    Map<String, Object> payload) {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
-            callSessionService.acceptCall(sessionId, receiverId);
-            callSessionRegistry.markPrivateAnswered(sessionId, callerId, receiverId, receiverDeviceId);
-            cancelRingingOnOtherDevices(receiverId, receiverDeviceId, sessionId, callerId);
+            callSessionService.acceptCall(sessionId, receiverId).ifPresent(session -> {
+                callSessionRegistry.markPrivateAnswered(sessionId, callerId, receiverId, receiverDeviceId);
+                cancelRingingOnOtherDevices(receiverId, receiverDeviceId, sessionId, callerId);
+            });
         }
         messaging.convertAndSendToUser(callerId, "/queue/signal", payload);
         if (!sessionId.isBlank()) {
@@ -183,9 +184,10 @@ public class SignalingController {
                                    Map<String, Object> payload) {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
-            callSessionService.rejectCall(sessionId, receiverId);
-            callSessionRegistry.markPrivateEnded(sessionId, callerId, receiverId);
-            cancelRingingOnOtherDevices(receiverId, receiverDeviceId, sessionId, callerId);
+            callSessionService.rejectCall(sessionId, receiverId).ifPresent(session -> {
+                callSessionRegistry.markPrivateEnded(sessionId, callerId, receiverId);
+                cancelRingingOnOtherDevices(receiverId, receiverDeviceId, sessionId, callerId);
+            });
         }
         messaging.convertAndSendToUser(callerId, "/queue/signal", payload);
     }
@@ -196,8 +198,8 @@ public class SignalingController {
                                 Map<String, Object> payload) {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
-            callSessionService.endCall(sessionId, userId);
-            callSessionRegistry.markPrivateEnded(sessionId, userId, otherUserId);
+            callSessionService.endCall(sessionId, userId).ifPresent(session ->
+                    callSessionRegistry.markPrivateEnded(sessionId, userId, otherUserId));
         }
         messaging.convertAndSendToUser(otherUserId, "/queue/signal", payload);
     }

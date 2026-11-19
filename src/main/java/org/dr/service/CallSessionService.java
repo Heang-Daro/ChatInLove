@@ -45,34 +45,49 @@ public class CallSessionService {
 
     @Transactional
     public Optional<CallSession> acceptCall(String sessionId, String receiverId) {
-        return callSessionRepo.findById(sessionId).map(s -> {
-            if (!s.getReceiverId().equals(receiverId)) return s;
-            if (s.getStatus() != CallSessionStatus.RINGING) return s;
-            s.setStatus(CallSessionStatus.ACTIVE);
-            return callSessionRepo.save(s);
-        });
+        Optional<CallSession> existing = callSessionRepo.findById(sessionId);
+        if (existing.isEmpty()) {
+            return Optional.empty();
+        }
+        CallSession session = existing.get();
+        if (!session.getReceiverId().equals(receiverId)
+                || session.getStatus() != CallSessionStatus.RINGING) {
+            return Optional.empty();
+        }
+        session.setStatus(CallSessionStatus.ACTIVE);
+        return Optional.of(callSessionRepo.save(session));
     }
 
     @Transactional
     public Optional<CallSession> endCall(String sessionId, String userId) {
-        return callSessionRepo.findById(sessionId).map(s -> {
-            if (!s.getCallerId().equals(userId) && !s.getReceiverId().equals(userId)) return s;
-            if (s.getStatus() == CallSessionStatus.ENDED) return s;
-            s.setStatus(CallSessionStatus.ENDED);
-            s.setEndedAt(LocalDateTime.now(ZoneOffset.UTC));
-            return callSessionRepo.save(s);
-        });
+        Optional<CallSession> existing = callSessionRepo.findById(sessionId);
+        if (existing.isEmpty()) {
+            return Optional.empty();
+        }
+        CallSession session = existing.get();
+        if ((!session.getCallerId().equals(userId) && !session.getReceiverId().equals(userId))
+                || session.getStatus() == CallSessionStatus.ENDED) {
+            return Optional.empty();
+        }
+        session.setStatus(CallSessionStatus.ENDED);
+        session.setEndedAt(LocalDateTime.now(ZoneOffset.UTC));
+        return Optional.of(callSessionRepo.save(session));
     }
 
     @Transactional
     public Optional<CallSession> rejectCall(String sessionId, String receiverId) {
-        return callSessionRepo.findById(sessionId).map(s -> {
-            if (!s.getReceiverId().equals(receiverId)) return s;
-            if (s.getStatus() != CallSessionStatus.RINGING) return s;
-            s.setStatus(CallSessionStatus.REJECTED);
-            s.setEndedAt(LocalDateTime.now(ZoneOffset.UTC));
-            return callSessionRepo.save(s);
-        });
+        Optional<CallSession> existing = callSessionRepo.findById(sessionId);
+        if (existing.isEmpty()) {
+            return Optional.empty();
+        }
+        CallSession session = existing.get();
+        if (!session.getReceiverId().equals(receiverId)
+                || session.getStatus() != CallSessionStatus.RINGING) {
+            return Optional.empty();
+        }
+        session.setStatus(CallSessionStatus.REJECTED);
+        session.setEndedAt(LocalDateTime.now(ZoneOffset.UTC));
+        return Optional.of(callSessionRepo.save(session));
     }
 
     /** Called when a user (re)connects to check for a missed ringing call. */

@@ -6,6 +6,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -25,6 +27,10 @@ public class CallSessionRegistry {
         try {
             ActiveCallSession existing = sessionsByUser.get(userId);
             if (existing == null) {
+                return Optional.empty();
+            }
+            if (isExpired(existing)) {
+                sessionsByUser.remove(userId);
                 return Optional.empty();
             }
             if (existing.getStatus() != CallProgress.CALLING && existing.getStatus() != CallProgress.IN_CALL) {
@@ -55,6 +61,10 @@ public class CallSessionRegistry {
             }
 
             ActiveCallSession receiverExisting = sessionsByUser.get(receiverId);
+            if (receiverExisting != null && isExpired(receiverExisting)) {
+                sessionsByUser.remove(receiverId);
+                receiverExisting = null;
+            }
             if (isPrivateCollision(receiverExisting, callerId)) {
                 sessionsByUser.put(callerId, ActiveCallSession.builder()
                         .callId(receiverExisting.getCallId())
@@ -63,6 +73,7 @@ public class CallSessionRegistry {
                         .peerOrGroupId(receiverId)
                         .status(CallProgress.RINGING)
                         .pendingOfferSdp(receiverExisting.getPendingOfferSdp())
+                        .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(45))
                         .build());
 
                 return PrivateOfferDecision.collision(
@@ -80,6 +91,7 @@ public class CallSessionRegistry {
                     .peerOrGroupId(receiverId)
                     .status(CallProgress.CALLING)
                     .pendingOfferSdp(sdpOffer)
+                    .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(45))
                     .build());
 
             boolean waiting = receiverExisting != null
@@ -93,6 +105,7 @@ public class CallSessionRegistry {
                         .peerOrGroupId(callerId)
                         .status(CallProgress.RINGING)
                         .pendingOfferSdp(sdpOffer)
+                        .expiresAt(LocalDateTime.now(ZoneOffset.UTC).plusSeconds(45))
                         .build());
             }
 
@@ -105,8 +118,9 @@ public class CallSessionRegistry {
             ActiveCallSession caller = sessionsByUser.get(callerId);
             if (caller != null && callId.equals(caller.getCallId())) {
                 caller.setStatus(CallProgress.IN_CALL);
+                caller.setExpiresAt(null);
                 sessionsByUser.put(callerId, caller);
-            } else {
+            } else if (caller == null) {
                 sessionsByUser.put(callerId, ActiveCallSession.builder()
                         .callId(callId)
                         .callType(RegistryCallType.PRIVATE)
@@ -115,13 +129,16 @@ public class CallSessionRegistry {
                         .build());
             }
 
-            sessionsByUser.put(calleeId, ActiveCallSession.builder()
-                    .callId(callId)
-                    .callType(RegistryCallType.PRIVATE)
-                    .activeDeviceId(calleeDeviceId)
-                    .peerOrGroupId(callerId)
-                    .status(CallProgress.IN_CALL)
-                    .build());
+            ActiveCallSession callee = sessionsByUser.get(calleeId);
+            if (callee == null || callId.equals(callee.getCallId())) {
+                sessionsByUser.put(calleeId, ActiveCallSession.builder()
+                        .callId(callId)
+                        .callType(RegistryCallType.PRIVATE)
+                        .activeDeviceId(calleeDeviceId)
+                        .peerOrGroupId(callerId)
+                        .status(CallProgress.IN_CALL)
+                        .build());
+            }
             return null;
         });
     }
@@ -179,12 +196,21 @@ public class CallSessionRegistry {
     }
 
     public Optional<ActiveCallSession> getActiveSession(String userId) {
-        return Optional.ofNullable(sessionsByUser.get(userId));
+        ActiveCallSession existing = sessionsByUser.get(userId);
+        if (existing != null && isExpired(existing)) {
+            sessionsByUser.remove(userId);
+            return Optional.empty();
+        }
+        return Optional.ofNullable(existing);
     }
 
     private Optional<String> outgoingBlockReasonNoLock(String userId, String requestingDeviceId) {
         ActiveCallSession existing = sessionsByUser.get(userId);
         if (existing == null) {
+            return Optional.empty();
+        }
+        if (isExpired(existing)) {
+            sessionsByUser.remove(userId);
             return Optional.empty();
         }
         if (existing.getStatus() != CallProgress.CALLING && existing.getStatus() != CallProgress.IN_CALL) {
@@ -205,6 +231,11 @@ public class CallSessionRegistry {
         if (existing != null && callId.equals(existing.getCallId())) {
             sessionsByUser.remove(userId);
         }
+    }
+
+    private boolean isExpired(ActiveCallSession session) {
+        return session.getExpiresAt() != null
+                && session.getExpiresAt().isBefore(LocalDateTime.now(ZoneOffset.UTC));
     }
 
     private boolean isPrivateCollision(ActiveCallSession receiverExisting, String callerId) {
@@ -259,6 +290,7 @@ public class CallSessionRegistry {
         private String peerOrGroupId;
         private CallProgress status;
         private String pendingOfferSdp;
+        private LocalDateTime expiresAt;
     }
 
     @Data

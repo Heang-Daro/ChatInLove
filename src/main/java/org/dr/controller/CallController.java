@@ -47,10 +47,6 @@ public class CallController {
 		String calleeId = user.getId();
 
 		Optional<CallSession> sessionOpt = callSessionService.acceptCall(sessionId, calleeId);
-		if (sessionOpt.isEmpty()) {
-			sessionOpt = callSessionRepository.findById(sessionId);
-		}
-
 		if (sessionOpt.isPresent()) {
 			CallSession session = sessionOpt.get();
 			String callerId = session.getCallerId();
@@ -102,10 +98,6 @@ public class CallController {
 		String calleeId = user.getId();
 
 		Optional<CallSession> sessionOpt = callSessionService.rejectCall(sessionId, calleeId);
-		if (sessionOpt.isEmpty()) {
-			sessionOpt = callSessionRepository.findById(sessionId);
-		}
-
 		if (sessionOpt.isPresent()) {
 			CallSession session = sessionOpt.get();
 			String callerId = session.getCallerId();
@@ -141,10 +133,6 @@ public class CallController {
 		String userId = user.getId();
 
 		Optional<CallSession> sessionOpt = callSessionService.endCall(sessionId, userId);
-		if (sessionOpt.isEmpty()) {
-			sessionOpt = callSessionRepository.findById(sessionId);
-		}
-
 		if (sessionOpt.isPresent()) {
 			CallSession session = sessionOpt.get();
 			String targetId = session.getCallerId().equals(userId) ? session.getReceiverId() : session.getCallerId();

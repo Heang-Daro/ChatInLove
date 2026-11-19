@@ -3,6 +3,7 @@ package org.dr.ws;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.dr.model.CallSession;
+import org.dr.service.CallSessionRegistry;
 import org.dr.service.CallSessionService;
 import org.dr.service.PresenceService;
 import org.springframework.context.event.EventListener;
@@ -27,6 +28,7 @@ public class PresenceEventListener {
 
     private final PresenceService presenceService;
     private final CallSessionService callSessionService;
+    private final CallSessionRegistry callSessionRegistry;
     private final SimpMessagingTemplate messaging;
 
     @EventListener
@@ -65,6 +67,13 @@ public class PresenceEventListener {
         Principal principal = sha.getUser();
         if (principal == null) return;
 
-        presenceService.onDisconnect(principal.getName(), sha.getSessionId());
+        String userId = principal.getName();
+        String sessionId = sha.getSessionId();
+        boolean cleared = callSessionRegistry.clearIfOwnedByDevice(userId, sessionId);
+        if (cleared) {
+            log.info("[Presence] Cleared active call lock for {} on device {} disconnect", userId, sessionId);
+        }
+
+        presenceService.onDisconnect(userId, sessionId);
     }
 }

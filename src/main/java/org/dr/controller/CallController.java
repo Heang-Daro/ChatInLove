@@ -7,8 +7,12 @@ import org.dr.dto.request.AcceptCallRequest;
 import org.dr.model.CallSession;
 import org.dr.model.User;
 import org.dr.repository.CallSessionRepository;
+import org.dr.service.CallSessionRegistry;
 import org.dr.service.CallSessionService;
+import org.dr.service.PresenceService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
@@ -26,6 +30,8 @@ public class CallController {
 
 	private final CallSessionService callSessionService;
 	private final CallSessionRepository callSessionRepository;
+	private final CallSessionRegistry callSessionRegistry;
+	private final PresenceService presenceService;
 	private final SimpMessagingTemplate messagingTemplate;
 
 	/**
@@ -48,6 +54,9 @@ public class CallController {
 		if (sessionOpt.isPresent()) {
 			CallSession session = sessionOpt.get();
 			String callerId = session.getCallerId();
+			String deviceId = request != null ? request.getDeviceId() : null;
+			callSessionRegistry.markPrivateAnswered(sessionId, callerId, calleeId, deviceId);
+			cancelRingingOnOtherDevices(calleeId, deviceId, sessionId, callerId);
 
 			Map<String, Object> signal = new HashMap<>();
 			signal.put("type", "CALL_ANSWER");
@@ -85,6 +94,7 @@ public class CallController {
 	 */
 	@PostMapping("/reject/{sessionId}")
 	public ResponseEntity<Map<String, Object>> rejectCall(@PathVariable String sessionId,
+			@RequestHeader(value = "X-Device-Id", required = false) String deviceId,
 			@AuthenticationPrincipal User user) {
 
 		if (user == null)
@@ -99,6 +109,8 @@ public class CallController {
 		if (sessionOpt.isPresent()) {
 			CallSession session = sessionOpt.get();
 			String callerId = session.getCallerId();
+			callSessionRegistry.markPrivateEnded(sessionId, callerId, calleeId);
+			cancelRingingOnOtherDevices(calleeId, deviceId, sessionId, callerId);
 
 			Map<String, Object> signal = new HashMap<>();
 			signal.put("type", "CALL_REJECT");
@@ -121,6 +133,7 @@ public class CallController {
 	 */
 	@PostMapping("/hangup/{sessionId}")
 	public ResponseEntity<Map<String, Object>> hangupCall(@PathVariable String sessionId,
+			@RequestHeader(value = "X-Device-Id", required = false) String deviceId,
 			@AuthenticationPrincipal User user) {
 
 		if (user == null)
@@ -135,6 +148,9 @@ public class CallController {
 		if (sessionOpt.isPresent()) {
 			CallSession session = sessionOpt.get();
 			String targetId = session.getCallerId().equals(userId) ? session.getReceiverId() : session.getCallerId();
+			if (targetId != null) {
+				callSessionRegistry.markPrivateEnded(sessionId, userId, targetId);
+			}
 
 			Map<String, Object> signal = new HashMap<>();
 			signal.put("type", "CALL_HANGUP");
@@ -150,6 +166,29 @@ public class CallController {
 		}
 
 		return ResponseEntity.notFound().build();
+	}
+
+	private void cancelRingingOnOtherDevices(String userId,
+			String acceptedDeviceId,
+			String callSessionId,
+			String peerUserId) {
+		if (acceptedDeviceId == null || acceptedDeviceId.isBlank()) {
+			return;
+		}
+		for (String sessionId : presenceService.getActiveSessionIds(userId)) {
+			if (acceptedDeviceId.equals(sessionId)) {
+				continue;
+			}
+			SimpMessageHeaderAccessor headers = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+			headers.setSessionId(sessionId);
+			headers.setLeaveMutable(true);
+			messagingTemplate.convertAndSendToUser(userId, "/queue/signal", Map.of(
+					"type", "CANCEL_RINGING",
+					"callSessionId", callSessionId,
+					"peerUserId", peerUserId,
+					"acceptedByDeviceId", acceptedDeviceId
+			), headers.getMessageHeaders());
+		}
 	}
 
 	@GetMapping("/session/{sessionId}")

@@ -9,13 +9,17 @@ import org.dr.model.enums.MessageType;
 import org.dr.repository.ConversationRepository;
 import org.dr.repository.UserRepository;
 import org.dr.service.CallSessionService;
+import org.dr.service.CallSessionRegistry;
 import org.dr.service.FcmService;
 import org.dr.service.MessageService;
 import org.dr.service.PresenceService;
 import org.dr.dto.request.SendMessageRequest;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
@@ -55,6 +59,7 @@ public class SignalingController {
     private final ConversationRepository  conversationRepository;
     private final UserRepository          userRepository;
     private final CallSessionService      callSessionService;
+    private final CallSessionRegistry     callSessionRegistry;
     private final PresenceService         presenceService;
     private final FcmService              fcmService;
     private final MessageService          messageService;
@@ -72,6 +77,7 @@ public class SignalingController {
     public void relay(
             @DestinationVariable String targetUserId,
             @Payload Map<String, Object> payload,
+            @Header(name = "simpSessionId", required = false) String websocketSessionId,
             Principal principal) {
 
         if (principal == null) {
@@ -80,15 +86,16 @@ public class SignalingController {
         }
 
         String callerId = principal.getName();
+        String callerDeviceId = extractDeviceId(payload, websocketSessionId);
         payload.put("fromUserId", callerId);  // server-stamped, not client-supplied
 
         String msgType = payload.getOrDefault("type", "UNKNOWN").toString();
         log.debug("[Signal] {} {} → {}", msgType, callerId, targetUserId);
 
         switch (msgType) {
-            case "CALL_OFFER" -> handleCallOffer(callerId, targetUserId, payload);
-            case "CALL_ANSWER" -> handleCallAnswer(callerId, targetUserId, payload);
-            case "CALL_REJECT" -> handleCallReject(callerId, targetUserId, payload);
+            case "CALL_OFFER" -> handleCallOffer(callerId, callerDeviceId, targetUserId, payload);
+            case "CALL_ANSWER" -> handleCallAnswer(callerId, callerDeviceId, targetUserId, payload);
+            case "CALL_REJECT" -> handleCallReject(callerId, callerDeviceId, targetUserId, payload);
             case "CALL_CANCEL",
                  "CALL_HANGUP" -> handleCallEnd(callerId, targetUserId, payload);
             default -> messaging.convertAndSendToUser(targetUserId, "/queue/signal", payload);
@@ -97,16 +104,44 @@ public class SignalingController {
 
     // ── CALL_OFFER ────────────────────────────────────────────────────────────
 
-    private void handleCallOffer(String callerId, String receiverId,
+    private void handleCallOffer(String callerId, String callerDeviceId, String receiverId,
                                   Map<String, Object> payload) {
         String callType   = payload.getOrDefault("callType", "AUDIO").toString();
         String sdpOffer   = extractSdp(payload);
         String convId     = payload.getOrDefault("conversationId", "").toString();
 
-        CallSession session = callSessionService.createCallSession(
-                callerId, receiverId, sdpOffer, callType);
+        CallSessionRegistry.PrivateOfferDecision decision = callSessionRegistry.startPrivateOffer(
+                callerId,
+                callerDeviceId,
+                receiverId,
+                sdpOffer,
+                () -> callSessionService.createCallSession(callerId, receiverId, sdpOffer, callType).getId());
 
-        payload.put("callSessionId", session.getId());
+        if (decision.getOutcome() == CallSessionRegistry.Outcome.REJECTED) {
+            sendToSingleDevice(callerId, callerDeviceId, Map.of(
+                    "type", "CALL_REJECTED_BUSY",
+                    "reason", decision.getReason(),
+                    "targetUserId", receiverId
+            ));
+            return;
+        }
+
+        if (decision.getOutcome() == CallSessionRegistry.Outcome.COLLISION) {
+            sendToSingleDevice(callerId, callerDeviceId, Map.of(
+                    "type", "COLLISION_AUTO_ACCEPT",
+                    "callSessionId", decision.getCallId(),
+                    "fromUserId", decision.getPeerUserId(),
+                    "peerPendingOfferSdp", decision.getPeerPendingOfferSdp(),
+                    "callType", callType
+            ));
+            return;
+        }
+
+        String callSessionId = decision.getCallId();
+        payload.put("callSessionId", callSessionId);
+        if (decision.isCallWaiting()) {
+            payload.put("isCallWaiting", true);
+        }
 
         String callerName = callerId;
         var callerOpt = userRepository.findById(callerId);
@@ -122,17 +157,19 @@ public class SignalingController {
         if (receiverOpt.isPresent() && receiverOpt.get().getFcmToken() != null) {
             String fcmToken = receiverOpt.get().getFcmToken();
             log.info("[Signal] Sending high-priority FCM call push to receiver {} (token={})", receiverId, fcmToken);
-            fcmService.sendIncomingCallPush(fcmToken, callerId, callerName, session.getId(), convId, callType, false);
+            fcmService.sendIncomingCallPush(fcmToken, callerId, callerName, callSessionId, convId, callType, false);
         }
     }
 
     // ── CALL_ANSWER ───────────────────────────────────────────────────────────
 
-    private void handleCallAnswer(String receiverId, String callerId,
+    private void handleCallAnswer(String receiverId, String receiverDeviceId, String callerId,
                                    Map<String, Object> payload) {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
             callSessionService.acceptCall(sessionId, receiverId);
+            callSessionRegistry.markPrivateAnswered(sessionId, callerId, receiverId, receiverDeviceId);
+            cancelRingingOnOtherDevices(receiverId, receiverDeviceId, sessionId, callerId);
         }
         messaging.convertAndSendToUser(callerId, "/queue/signal", payload);
         if (!sessionId.isBlank()) {
@@ -142,11 +179,13 @@ public class SignalingController {
 
     // ── CALL_REJECT ───────────────────────────────────────────────────────────
 
-    private void handleCallReject(String receiverId, String callerId,
+    private void handleCallReject(String receiverId, String receiverDeviceId, String callerId,
                                    Map<String, Object> payload) {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
             callSessionService.rejectCall(sessionId, receiverId);
+            callSessionRegistry.markPrivateEnded(sessionId, callerId, receiverId);
+            cancelRingingOnOtherDevices(receiverId, receiverDeviceId, sessionId, callerId);
         }
         messaging.convertAndSendToUser(callerId, "/queue/signal", payload);
     }
@@ -158,6 +197,7 @@ public class SignalingController {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
             callSessionService.endCall(sessionId, userId);
+            callSessionRegistry.markPrivateEnded(sessionId, userId, otherUserId);
         }
         messaging.convertAndSendToUser(otherUserId, "/queue/signal", payload);
     }
@@ -175,6 +215,7 @@ public class SignalingController {
     public void broadcastGroupSignal(
             @DestinationVariable String conversationId,
             @Payload Map<String, Object> payload,
+            @Header(name = "simpSessionId", required = false) String websocketSessionId,
             Principal principal) {
 
         if (principal == null) {
@@ -183,6 +224,7 @@ public class SignalingController {
         }
 
         String callerId = principal.getName();
+        String callerDeviceId = extractDeviceId(payload, websocketSessionId);
         payload.put("fromUserId", callerId);
         payload.put("conversationId", conversationId);
 
@@ -190,9 +232,9 @@ public class SignalingController {
         log.debug("[Signal] group {} {} on conv {}", msgType, callerId, conversationId);
 
         if ("GROUP_CALL_STARTED".equals(msgType)) {
-            handleGroupCallStarted(callerId, conversationId, payload);
+            handleGroupCallStarted(callerId, callerDeviceId, conversationId, payload);
         } else if ("LEAVE_CALL".equals(msgType) || "JOIN_CALL".equals(msgType)) {
-            handleGroupCallMembership(callerId, conversationId, msgType, payload);
+            handleGroupCallMembership(callerId, callerDeviceId, conversationId, msgType, payload);
         } else {
             broadcastToGroupMembers(conversationId, callerId, payload);
         }
@@ -200,8 +242,32 @@ public class SignalingController {
 
     // ── GROUP_CALL_STARTED ────────────────────────────────────────────────────
 
-    private void handleGroupCallStarted(String callerId, String conversationId,
+    private void handleGroupCallStarted(String callerId, String callerDeviceId, String conversationId,
                                          Map<String, Object> payload) {
+        var blockReason = callSessionRegistry.outgoingBlockReason(callerId, callerDeviceId);
+        if (blockReason.isPresent()) {
+            sendToSingleDevice(callerId, callerDeviceId, Map.of(
+                    "type", "CALL_REJECTED_BUSY",
+                    "reason", blockReason.get(),
+                    "conversationId", conversationId
+            ));
+            return;
+        }
+
+        var existingActive = callSessionService.findActiveGroupCall(conversationId);
+        if (existingActive.isPresent()) {
+            GroupCallSession live = existingActive.get();
+            callSessionRegistry.markGroupInCall(callerId, callerDeviceId, live.getId(), conversationId);
+
+            Map<String, Object> routed = new HashMap<>(payload);
+            routed.put("type", "GROUP_CALL_STARTED");
+            routed.put("callSessionId", live.getId());
+            routed.put("reusedSession", true);
+            routed.put("activeParticipants", live.getActiveParticipantIds());
+            sendToSingleDevice(callerId, callerDeviceId, routed);
+            return;
+        }
+
         String callType = payload.getOrDefault("callType", "AUDIO").toString();
 
         // Create persistent group call session.
@@ -210,6 +276,7 @@ public class SignalingController {
 
         payload.put("callSessionId", gcs.getId());
         payload.put("activeParticipants", Set.of(callerId));
+        callSessionRegistry.markGroupInCall(callerId, callerDeviceId, gcs.getId(), conversationId);
 
         // Persist a GROUP_CALL_INVITE message in the conversation so it
         // appears in the chat timeline for both online and future members.
@@ -229,20 +296,23 @@ public class SignalingController {
 
     // ── JOIN_CALL / LEAVE_CALL ────────────────────────────────────────────────
 
-    private void handleGroupCallMembership(String userId, String conversationId,
+    private void handleGroupCallMembership(String userId, String userDeviceId, String conversationId,
                                             String type, Map<String, Object> payload) {
         String sessionId = payload.getOrDefault("callSessionId", "").toString();
         if (!sessionId.isBlank()) {
             if ("JOIN_CALL".equals(type)) {
                 callSessionService.participantJoined(sessionId, userId)
-                        .ifPresent(s -> payload.put("activeParticipants",
-                                s.getActiveParticipantIds()));
+                        .ifPresent(s -> {
+                            payload.put("activeParticipants", s.getActiveParticipantIds());
+                            callSessionRegistry.markGroupInCall(userId, userDeviceId, sessionId, conversationId);
+                        });
             } else {
                 callSessionService.participantLeft(sessionId, userId)
                         .ifPresent(s -> {
                             payload.put("activeParticipants", s.getActiveParticipantIds());
                             payload.put("callEnded",
                                     s.getStatus() == CallSessionStatus.ENDED);
+                            callSessionRegistry.clearGroupIfMatches(userId, sessionId);
                         });
             }
         }
@@ -286,5 +356,44 @@ public class SignalingController {
             return ((Map<String, Object>) sdp).getOrDefault("sdp", "").toString();
         }
         return sdp.toString();
+    }
+
+    private String extractDeviceId(Map<String, Object> payload, String websocketSessionId) {
+        String payloadDeviceId = payload.getOrDefault("deviceId", "").toString();
+        if (!payloadDeviceId.isBlank()) {
+            return payloadDeviceId;
+        }
+        return websocketSessionId;
+    }
+
+    private void cancelRingingOnOtherDevices(String userId,
+                                             String acceptedDeviceId,
+                                             String callSessionId,
+                                             String peerUserId) {
+        if (acceptedDeviceId == null || acceptedDeviceId.isBlank()) {
+            return;
+        }
+        for (String sessionId : presenceService.getActiveSessionIds(userId)) {
+            if (acceptedDeviceId.equals(sessionId)) {
+                continue;
+            }
+            sendToSingleDevice(userId, sessionId, Map.of(
+                    "type", "CANCEL_RINGING",
+                    "callSessionId", callSessionId,
+                    "peerUserId", peerUserId,
+                    "acceptedByDeviceId", acceptedDeviceId
+            ));
+        }
+    }
+
+    private void sendToSingleDevice(String userId, String sessionId, Map<String, Object> payload) {
+        if (sessionId == null || sessionId.isBlank()) {
+            messaging.convertAndSendToUser(userId, "/queue/signal", payload);
+            return;
+        }
+        SimpMessageHeaderAccessor headers = SimpMessageHeaderAccessor.create(SimpMessageType.MESSAGE);
+        headers.setSessionId(sessionId);
+        headers.setLeaveMutable(true);
+        messaging.convertAndSendToUser(userId, "/queue/signal", payload, headers.getMessageHeaders());
     }
 }

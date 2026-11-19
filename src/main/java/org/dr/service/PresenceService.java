@@ -7,6 +7,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -73,6 +74,14 @@ public class PresenceService {
 
     public Long getLastSeen(String userId) {
         return lastSeen.get(userId);
+    }
+
+    public Set<String> getActiveSessionIds(String userId) {
+        Set<String> sessions = userSessions.get(userId);
+        if (sessions == null || sessions.isEmpty()) {
+            return Set.of();
+        }
+        return new HashSet<>(sessions);
     }
 
     // ── Broadcast ─────────────────────────────────────────────────────────────
